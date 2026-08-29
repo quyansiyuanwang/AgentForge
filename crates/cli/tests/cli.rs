@@ -191,6 +191,7 @@ fn init_non_interactive_generates_spec_and_artifacts() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(root.path().join(".agentforge/project.yaml").exists());
+    assert!(root.path().join(".agentforge/lock.yaml").exists());
     assert!(root.path().join("AGENTS.md").exists());
     assert!(root.path().join(".agentforge/manifest.json").exists());
 }

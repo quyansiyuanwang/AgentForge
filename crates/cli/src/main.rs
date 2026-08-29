@@ -1040,6 +1040,16 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 rendered.into_bytes(),
             )])
             .map_err(runtime)?;
+        let empty_lock = LockFile::new(format!("agentforge {}", env!("CARGO_PKG_VERSION")), vec![])
+            .map_err(runtime)?
+            .to_yaml()
+            .map_err(runtime)?;
+        ApplicationService::new(&root)
+            .apply_control_files(&[(
+                PathBuf::from(".agentforge/lock.yaml"),
+                empty_lock.into_bytes(),
+            )])
+            .map_err(runtime)?;
         if spec
             .skills
             .iter()
