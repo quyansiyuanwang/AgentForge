@@ -20,6 +20,8 @@ pub struct ProjectProfile {
     #[serde(default)]
     pub tools: Vec<String>,
     #[serde(default)]
+    pub commands: BTreeMap<String, String>,
+    #[serde(default)]
     pub evidence: Vec<Evidence>,
 }
 

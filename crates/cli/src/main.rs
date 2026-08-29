@@ -1295,15 +1295,26 @@ fn split_ref_version(value: &str) -> (&str, Option<&str>) {
 }
 
 fn project_context(profile: &agentforge_core::model::ProjectProfile) -> String {
+    let command = |name: &str| {
+        profile
+            .commands
+            .get(name)
+            .map(|value| format!("`{value}`"))
+            .unwrap_or_else(|| "TODO (confirm the repository command)".into())
+    };
     format!(
-        "# AgentForge Project Context\n\n## Detected project facts\n- Languages: {}\n- Frameworks: {}\n- Databases: {}\n- Package managers: {}\n- Tests: {}\n- CI: {}\n- Tools: {}\n\n## Project commands\n- install: TODO (confirm the repository command)\n- build: TODO (confirm the repository command)\n- test: TODO (confirm the repository command)\n- lint: TODO (confirm the repository command)\n\n## Editing boundaries\n- Edit canonical sources and `.agentforge/project.yaml`; do not hand-edit generated target files.\n- Run `agentforge diff` before committing generated changes.\n- Move team-specific instructions, skills, MCP servers, and subagents into declared sources.\n",
+        "# AgentForge Project Context\n\n## Detected project facts\n- Languages: {}\n- Frameworks: {}\n- Databases: {}\n- Package managers: {}\n- Tests: {}\n- CI: {}\n- Tools: {}\n\n## Project commands\n- install: {}\n- build: {}\n- test: {}\n- lint: {}\n\n## Editing boundaries\n- Edit canonical sources and `.agentforge/project.yaml`; do not hand-edit generated target files.\n- Run `agentforge diff` before committing generated changes.\n- Move team-specific instructions, skills, MCP servers, and subagents into declared sources.\n",
         join(&profile.languages),
         join(&profile.frameworks),
         join(&profile.databases),
         join(&profile.package_managers),
         join(&profile.tests),
         join(&profile.ci),
-        join(&profile.tools)
+        join(&profile.tools),
+        command("install"),
+        command("build"),
+        command("test"),
+        command("lint")
     )
 }
 

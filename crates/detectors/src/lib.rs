@@ -26,6 +26,7 @@ pub enum DetectorError {
 pub struct DetectorOutput {
     pub evidence: Vec<Evidence>,
     pub diagnostics: Vec<Diagnostic>,
+    pub commands: BTreeMap<String, String>,
 }
 
 pub struct DetectionContext<'a> {
@@ -62,11 +63,13 @@ impl DetectionEngine {
     pub fn detect(&self, context: &DetectionContext<'_>) -> DetectionReport {
         let mut evidence = Vec::new();
         let mut diagnostics = Vec::new();
+        let mut commands = BTreeMap::new();
         for detector in &self.detectors {
             match detector.detect(context) {
                 Ok(mut output) => {
                     evidence.append(&mut output.evidence);
                     diagnostics.append(&mut output.diagnostics);
+                    commands.extend(output.commands);
                 }
                 Err(error) => diagnostics.push(
                     Diagnostic::warning(
@@ -78,7 +81,7 @@ impl DetectionEngine {
             }
         }
         DetectionReport {
-            profile: aggregate(evidence),
+            profile: aggregate(evidence, commands),
             diagnostics,
         }
     }
@@ -207,6 +210,13 @@ impl Detector for NodeDetector {
                 file,
                 "package.json exists",
             ));
+            if let Some(scripts) = value.get("scripts").and_then(|value| value.as_object()) {
+                for (name, command) in scripts {
+                    if let Some(command) = command.as_str() {
+                        output.commands.insert(name.clone(), command.to_owned());
+                    }
+                }
+            }
             let dependencies = dependency_names(&value);
             for (dependency, category, name) in [
                 ("typescript", EvidenceCategory::Language, "typescript"),
@@ -440,7 +450,7 @@ fn fact(
     }
 }
 
-fn aggregate(mut evidence: Vec<Evidence>) -> ProjectProfile {
+fn aggregate(mut evidence: Vec<Evidence>, commands: BTreeMap<String, String>) -> ProjectProfile {
     evidence.sort_by(|a, b| {
         a.category
             .cmp(&b.category)
@@ -469,6 +479,7 @@ fn aggregate(mut evidence: Vec<Evidence>) -> ProjectProfile {
         tests: values(EvidenceCategory::Test),
         ci: values(EvidenceCategory::Ci),
         tools: values(EvidenceCategory::Tool),
+        commands,
         evidence,
     }
 }

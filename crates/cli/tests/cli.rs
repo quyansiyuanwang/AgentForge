@@ -338,6 +338,10 @@ fn nextjs_project_full_offline_rebuild_e2e() {
         .success();
     assert!(root.path().join(".agentforge/project.yaml").exists());
     assert!(root.path().join(".agentforge/lock.yaml").exists());
+    let context =
+        fs::read_to_string(root.path().join(".agentforge/generated/project-context.md")).unwrap();
+    assert!(context.contains("`next build`"));
+    assert!(context.contains("`vitest`"));
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(root.path().join(".agentforge/manifest.json")).unwrap())
             .unwrap();

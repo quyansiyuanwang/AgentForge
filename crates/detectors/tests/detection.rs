@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::{fs, io, path::Path};
 
 use agentforge_core::{
@@ -166,6 +167,7 @@ impl Detector for WorkingDetector {
                 reason: "fixture".into(),
             }],
             diagnostics: vec![],
+            commands: BTreeMap::new(),
         })
     }
 }
