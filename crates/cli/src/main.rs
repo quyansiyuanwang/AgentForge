@@ -339,6 +339,17 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
     let lock_path = root.join(".agentforge/lock.yaml");
     let manifest_path = root.join(".agentforge/manifest.json");
     checks.push(json!({"check":"lock","path":lock_path,"healthy":lock_path.exists()}));
+    if !lock_path.exists() {
+        compilation.diagnostics.push(
+            Diagnostic::warning(
+                DiagnosticCode::UnknownReference,
+                "lock.yaml is missing; run init or explicitly vendor remote sources",
+            )
+            .with_remediation(
+                "create .agentforge/lock.yaml before committing the project configuration",
+            ),
+        );
+    }
     if let Ok(bytes) = std::fs::read(&lock_path) {
         if let Ok(lock) = serde_yaml::from_slice::<LockFile>(&bytes) {
             let mut referenced = std::collections::BTreeSet::new();
