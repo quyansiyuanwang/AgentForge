@@ -1276,6 +1276,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
     let vendor_root = root.join(".agentforge/vendor");
     let previous_vendor = vendor_root.exists();
     let vendor_backup = root.join(format!(".agentforge/.vendor-backup-{}", std::process::id()));
+    let mut remote_previews = Vec::new();
     if !args.dry_run && previous_vendor {
         if vendor_backup.exists() {
             return Err(CliFailure {
@@ -1311,7 +1312,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
             .iter()
             .any(|item| !matches!(item.source, agentforge_core::model::Source::Local { .. }))
         {
-            if let Err(error) = update_resources(
+            match update_resources(
                 &root,
                 "skill",
                 None,
@@ -1320,13 +1321,16 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 args.allow_unpinned_source,
                 args.allow_executable_content,
             ) {
-                rollback_init_files(
-                    &root,
-                    previous_lock.as_deref(),
-                    previous_vendor,
-                    previous_context.as_deref(),
-                );
-                return Err(error);
+                Ok(outcome) => remote_previews.push(outcome.human),
+                Err(error) => {
+                    rollback_init_files(
+                        &root,
+                        previous_lock.as_deref(),
+                        previous_vendor,
+                        previous_context.as_deref(),
+                    );
+                    return Err(error);
+                }
             }
         }
         if spec.mcp.iter().any(|item| {
@@ -1334,7 +1338,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 !matches!(source, agentforge_core::model::Source::Local { .. })
             })
         }) {
-            if let Err(error) = update_resources(
+            match update_resources(
                 &root,
                 "mcp",
                 None,
@@ -1343,13 +1347,16 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 args.allow_unpinned_source,
                 args.allow_executable_content,
             ) {
-                rollback_init_files(
-                    &root,
-                    previous_lock.as_deref(),
-                    previous_vendor,
-                    previous_context.as_deref(),
-                );
-                return Err(error);
+                Ok(outcome) => remote_previews.push(outcome.human),
+                Err(error) => {
+                    rollback_init_files(
+                        &root,
+                        previous_lock.as_deref(),
+                        previous_vendor,
+                        previous_context.as_deref(),
+                    );
+                    return Err(error);
+                }
             }
         }
     }
@@ -1415,6 +1422,9 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
             "Initialized project".to_owned()
         }
     };
+    if !remote_previews.is_empty() {
+        human = format!("{}\n{}", remote_previews.join("\n"), human);
+    }
     if !args.dry_run && vendor_backup.exists() {
         std::fs::remove_dir_all(&vendor_backup).map_err(runtime)?;
     }
