@@ -623,4 +623,9 @@ fn doctor_detects_manifest_renderer_version_drift() {
         .unwrap();
     assert_eq!(check["healthy"], false);
     assert!(!check["mismatches"].as_array().unwrap().is_empty());
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["doctor", "--strict"])
+        .assert()
+        .code(1);
 }
