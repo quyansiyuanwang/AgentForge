@@ -167,6 +167,23 @@ fn rejects_url_user_information() {
 }
 
 #[test]
+fn rejects_insecure_git_repository() {
+    let yaml = r#"
+schemaVersion: "1"
+project: { name: demo }
+targets: [codex]
+skills:
+  - id: insecure
+    source:
+      type: git
+      repository: http://example.com/repo.git
+      rev: v1
+"#;
+    let outcome = SpecValidator::new().validate_yaml(yaml);
+    assert!(!outcome.is_valid());
+}
+
+#[test]
 fn rejects_sensitive_url_query_parameters() {
     let yaml = VALID_SPEC.replace(
         "https://mcp.example.com/mcp",

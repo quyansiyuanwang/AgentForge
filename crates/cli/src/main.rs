@@ -655,6 +655,7 @@ fn update_resources(
             let mut entries = existing.sources.clone();
             let mut changed = Vec::new();
             let mut pending_vendor = Vec::new();
+            let mut cleanup_vendor = Vec::new();
             if kind == "skill" {
                 for item in spec
                     .skills
@@ -685,6 +686,9 @@ fn update_resources(
                     {
                         if !dry_run {
                             pending_vendor.push((lock.vendor_path.clone(), vendor));
+                            cleanup_vendor.push(PathBuf::from(
+                                lock.vendor_path.replace('/', std::path::MAIN_SEPARATOR_STR),
+                            ));
                         }
                         entries.retain(|entry| {
                             !(entry.kind == ContentKind::Skill && entry.id == item.id)
@@ -724,6 +728,9 @@ fn update_resources(
                     {
                         if !dry_run {
                             pending_vendor.push((lock.vendor_path.clone(), vendor));
+                            cleanup_vendor.push(PathBuf::from(
+                                lock.vendor_path.replace('/', std::path::MAIN_SEPARATOR_STR),
+                            ));
                         }
                         entries.retain(|entry| {
                             !(entry.kind == ContentKind::Mcp && entry.id == item.0.id)
@@ -756,7 +763,7 @@ fn update_resources(
                     )))
                     .collect::<Vec<_>>();
                 ApplicationService::new(root)
-                    .apply_control_files_with_modes(&files)
+                    .apply_control_files_with_modes_and_cleanup(&files, &cleanup_vendor)
                     .map_err(|error| error.to_string())?;
             }
             Ok::<_, String>(changed)

@@ -292,3 +292,24 @@ fn control_files_with_modes_preserve_vendor_executable_bits() {
         assert_eq!(mode & 0o777, 0o755);
     }
 }
+
+#[test]
+fn control_tree_replacement_removes_stale_vendor_files() {
+    let root = tempfile::tempdir().unwrap();
+    let old_dir = root.path().join(".agentforge/vendor/skills/demo");
+    fs::create_dir_all(&old_dir).unwrap();
+    fs::write(old_dir.join("old.md"), b"stale").unwrap();
+    let service = ApplicationService::new(root.path());
+    service
+        .apply_control_files_with_modes_and_cleanup(
+            &[(
+                PathBuf::from(".agentforge/vendor/skills/demo/new.md"),
+                b"current".to_vec(),
+                0o644,
+            )],
+            &[PathBuf::from(".agentforge/vendor/skills/demo")],
+        )
+        .unwrap();
+    assert!(!old_dir.join("old.md").exists());
+    assert_eq!(fs::read(old_dir.join("new.md")).unwrap(), b"current");
+}

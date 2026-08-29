@@ -38,7 +38,7 @@
           "properties": { "type": { "const": "url" }, "url": { "type": "string", "format": "uri", "pattern": "^https://" },
             "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } } },
         { "type": "object", "additionalProperties": false, "required": ["type", "repository", "rev"],
-          "properties": { "type": { "const": "git" }, "repository": { "type": "string", "format": "uri" },
+          "properties": { "type": { "const": "git" }, "repository": { "type": "string", "format": "uri", "pattern": "^https://" },
             "rev": { "type": "string" }, "subpath": { "$ref": "#/$defs/path" } } },
         { "type": "object", "additionalProperties": false, "required": ["type", "ref"],
           "properties": { "type": { "enum": ["skills-sh", "mcp-registry"] },
@@ -118,4 +118,3 @@
     }
   }
 }
-

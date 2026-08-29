@@ -191,6 +191,15 @@ impl<V: ApplyValidator, F: FaultInjector> ApplicationService<V, F> {
         &self,
         files: &[(PathBuf, Vec<u8>, u32)],
     ) -> Result<(), ApplyError> {
+        self.apply_control_files_with_modes_and_cleanup(files, &[])
+    }
+
+    /// Atomically replaces control files and removes stale files below the supplied directories.
+    pub fn apply_control_files_with_modes_and_cleanup(
+        &self,
+        files: &[(PathBuf, Vec<u8>, u32)],
+        cleanup_dirs: &[PathBuf],
+    ) -> Result<(), ApplyError> {
         let mut seen = std::collections::BTreeSet::new();
         for (relative, _, _) in files {
             let key = relative
@@ -203,13 +212,32 @@ impl<V: ApplyValidator, F: FaultInjector> ApplicationService<V, F> {
                 ));
             }
         }
+        let mut cleanup_keys = std::collections::BTreeSet::new();
+        for directory in cleanup_dirs {
+            let text = directory.to_string_lossy().replace('\\', "/");
+            validate_relative(&text)?;
+            validate_repository_path(&self.root, &text)?;
+            if !cleanup_keys.insert(text.to_ascii_lowercase()) {
+                return Err(ApplyError::UnsafePath(text));
+            }
+        }
         let transaction = tempfile::Builder::new()
             .prefix(".control-")
             .tempdir_in(&self.root)
             .map_err(|source| io_error(&self.root, source))?;
         let mut backups = Vec::new();
+        let mut directory_backups: Vec<(PathBuf, PathBuf)> = Vec::new();
         let mut installed = Vec::new();
         let result = (|| {
+            for (index, directory) in cleanup_dirs.iter().enumerate() {
+                let target = self.root.join(directory);
+                if !target.exists() {
+                    continue;
+                }
+                let backup = transaction.path().join(format!("tree-backup-{index}"));
+                fs::rename(&target, &backup).map_err(|source| io_error(&target, source))?;
+                directory_backups.push((target, backup));
+            }
             for (relative, bytes, mode) in files {
                 let relative_text = relative.to_string_lossy().replace('\\', "/");
                 validate_relative(&relative_text)?;
@@ -239,6 +267,9 @@ impl<V: ApplyValidator, F: FaultInjector> ApplicationService<V, F> {
                 let _ = fs::remove_file(target);
             }
             for (target, backup) in backups.iter().rev() {
+                let _ = fs::rename(backup, target);
+            }
+            for (target, backup) in directory_backups.iter().rev() {
                 let _ = fs::rename(backup, target);
             }
             return Err(error);
