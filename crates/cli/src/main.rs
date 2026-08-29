@@ -899,6 +899,75 @@ fn source_preview_human(updated: &[Value], dry_run: bool) -> String {
     output
 }
 
+fn preview_remote_sources(
+    spec: &agentforge_core::model::ProjectSpec,
+    allow_unpinned: bool,
+    allow_executable_content: bool,
+) -> Result<Vec<Value>, CliFailure> {
+    let runtime = tokio::runtime::Runtime::new().map_err(internal)?;
+    runtime
+        .block_on(async {
+            let http = ReqwestHttpFetcher::new().map_err(|error| error.to_string())?;
+            let service = SourceService::new(http, ProcessGitFetcher::default());
+            let mut summaries = Vec::new();
+            for item in &spec.skills {
+                if matches!(item.source, agentforge_core::model::Source::Local { .. }) {
+                    continue;
+                }
+                if let ResolvedSource::Remote { lock, vendor } = service
+                    .resolve(ResolveRequest {
+                        kind: ContentKind::Skill,
+                        id: &item.id,
+                        source: &item.source,
+                        allow_unpinned,
+                        allow_executable_content,
+                        installed_vendor_bytes: 0,
+                    })
+                    .await
+                    .map_err(|error| error.to_string())?
+                {
+                    summaries.push(remote_summary(
+                        ContentKind::Skill,
+                        &item.id,
+                        &lock,
+                        &vendor,
+                        &[],
+                    ));
+                }
+            }
+            for item in &spec.mcp {
+                let Some(source) = item.source.as_ref() else {
+                    continue;
+                };
+                if matches!(source, agentforge_core::model::Source::Local { .. }) {
+                    continue;
+                }
+                if let ResolvedSource::Remote { lock, vendor } = service
+                    .resolve(ResolveRequest {
+                        kind: ContentKind::Mcp,
+                        id: &item.id,
+                        source,
+                        allow_unpinned,
+                        allow_executable_content,
+                        installed_vendor_bytes: 0,
+                    })
+                    .await
+                    .map_err(|error| error.to_string())?
+                {
+                    summaries.push(remote_summary(
+                        ContentKind::Mcp,
+                        &item.id,
+                        &lock,
+                        &vendor,
+                        &item.env,
+                    ));
+                }
+            }
+            Ok::<_, String>(summaries)
+        })
+        .map_err(|message| CliFailure { message, exit: 3 })
+}
+
 fn remote_summary(
     kind: ContentKind,
     id: &str,
@@ -1277,6 +1346,16 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
     let previous_vendor = vendor_root.exists();
     let vendor_backup = root.join(format!(".agentforge/.vendor-backup-{}", std::process::id()));
     let mut remote_previews = Vec::new();
+    if args.dry_run {
+        let summaries = preview_remote_sources(
+            &spec,
+            args.allow_unpinned_source,
+            args.allow_executable_content,
+        )?;
+        if !summaries.is_empty() {
+            remote_previews.push(source_preview_human(&summaries, true));
+        }
+    }
     if !args.dry_run && previous_vendor {
         if vendor_backup.exists() {
             return Err(CliFailure {
