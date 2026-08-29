@@ -653,13 +653,45 @@ fn write_vendor(
     vendor: &agentforge_sources::VendorTree,
 ) -> Result<(), String> {
     let directory = root.join(vendor_path.replace('/', std::path::MAIN_SEPARATOR_STR));
-    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let parent = directory
+        .parent()
+        .ok_or_else(|| "vendor path has no parent".to_owned())?;
+    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let staging = parent.join(format!(
+        ".staging-{}-{}",
+        std::process::id(),
+        vendor_path.len()
+    ));
+    if staging.exists() {
+        std::fs::remove_dir_all(&staging).map_err(|error| error.to_string())?;
+    }
+    std::fs::create_dir_all(&staging).map_err(|error| error.to_string())?;
     for file in &vendor.files {
-        let path = directory.join(file.path.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let path = staging.join(file.path.replace('/', std::path::MAIN_SEPARATOR_STR));
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
         std::fs::write(path, &file.content).map_err(|error| error.to_string())?;
+    }
+    let backup = parent.join(format!(
+        ".backup-{}-{}",
+        std::process::id(),
+        vendor_path.len()
+    ));
+    if backup.exists() {
+        std::fs::remove_dir_all(&backup).map_err(|error| error.to_string())?;
+    }
+    if directory.exists() {
+        std::fs::rename(&directory, &backup).map_err(|error| error.to_string())?;
+    }
+    if let Err(error) = std::fs::rename(&staging, &directory) {
+        if backup.exists() && !directory.exists() {
+            let _ = std::fs::rename(&backup, &directory);
+        }
+        return Err(error.to_string());
+    }
+    if backup.exists() {
+        std::fs::remove_dir_all(&backup).map_err(|error| error.to_string())?;
     }
     Ok(())
 }
