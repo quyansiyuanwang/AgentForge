@@ -334,6 +334,11 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
         checks.push(json!({"check":"rendererVersion","healthy":!renderers.is_empty(),"renderers":renderers}));
     }
     checks.push(json!({"check":"artifactDrift","healthy":!compilation.plan.has_conflicts(),"changes":changes_json(&compilation)}));
+    checks.push(json!({
+        "check":"capabilities",
+        "healthy":!compilation.capabilities.blocks_apply(false),
+        "decisions":compilation.capabilities.decisions
+    }));
     for variable in compilation
         .spec
         .mcp
