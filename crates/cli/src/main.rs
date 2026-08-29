@@ -583,11 +583,8 @@ fn update_resources(
                 let lock =
                     LockFile::new(format!("agentforge {}", env!("CARGO_PKG_VERSION")), entries)
                         .map_err(|error| error.to_string())?;
-                std::fs::write(
-                    lock_path,
-                    lock.to_yaml().map_err(|error| error.to_string())?,
-                )
-                .map_err(|error| error.to_string())?;
+                let yaml = lock.to_yaml().map_err(|error| error.to_string())?;
+                atomic_write(&lock_path, yaml.as_bytes()).map_err(|error| error.to_string())?;
             }
             Ok::<_, String>(changed)
         })
@@ -654,6 +651,12 @@ fn mutate_spec(
         }),
         ("mcp", "remove") => spec.mcp.retain(|item| item.id != value),
         ("subagent", "remove") => spec.subagents.retain(|item| item.id != value),
+        ("subagent", "add") => spec.subagents.push(agentforge_core::model::Subagent {
+            id,
+            description: format!("AgentForge subagent from {value}"),
+            instructions: Source::Local { path: value.into() },
+            skills: vec![],
+        }),
         ("target", "add") => {
             let target =
                 serde_yaml::from_str::<agentforge_core::model::Target>(&format!("{value}\n"))
@@ -699,7 +702,7 @@ fn mutate_spec(
     let path = root.join(".agentforge/project.yaml");
     let rendered = serde_yaml::to_string(&spec).map_err(internal)?;
     if !dry_run {
-        std::fs::write(&path, rendered.as_bytes()).map_err(runtime)?;
+        atomic_write(&path, rendered.as_bytes()).map_err(runtime)?;
     }
     Ok(outcome_value(
         &format!("{kind} {operation}"),
@@ -713,6 +716,22 @@ fn mutate_spec(
         false,
         false,
     ))
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("path has no parent"))?;
+    std::fs::create_dir_all(parent)?;
+    let temp = parent.join(format!(
+        ".{}.tmp-{}",
+        path.file_name()
+            .and_then(|v| v.to_str())
+            .unwrap_or("agentforge"),
+        std::process::id()
+    ));
+    std::fs::write(&temp, bytes)?;
+    std::fs::rename(&temp, path)
 }
 fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
     let root = repository_root().map_err(runtime)?;
@@ -801,8 +820,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         filesystem: &RealFileSystem,
     });
     if !args.dry_run {
-        std::fs::create_dir_all(path.parent().expect("spec parent")).map_err(runtime)?;
-        std::fs::write(&path, rendered.as_bytes()).map_err(runtime)?;
+        atomic_write(&path, rendered.as_bytes()).map_err(runtime)?;
     }
     Ok(outcome(
         "init",
