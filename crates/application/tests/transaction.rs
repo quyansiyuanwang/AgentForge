@@ -264,4 +264,9 @@ fn control_files_replace_atomically_and_restore_on_invalid_path() {
         .filter(|entry| entry.file_name().to_string_lossy().starts_with(".control-"))
         .count();
     assert_eq!(leftovers, 0);
+    let duplicate = service.apply_control_files(&[
+        (PathBuf::from(".agentforge/a"), b"a".to_vec()),
+        (PathBuf::from(".agentforge/a"), b"b".to_vec()),
+    ]);
+    assert!(matches!(duplicate, Err(ApplyError::UnsafePath(_))));
 }

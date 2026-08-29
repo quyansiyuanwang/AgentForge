@@ -179,6 +179,18 @@ impl<V: ApplyValidator, F: FaultInjector> ApplicationService<V, F> {
 
     /// Atomically writes non-generated control files such as ProjectSpec and lock metadata.
     pub fn apply_control_files(&self, files: &[(PathBuf, Vec<u8>)]) -> Result<(), ApplyError> {
+        let mut seen = std::collections::BTreeSet::new();
+        for (relative, _) in files {
+            let key = relative
+                .to_string_lossy()
+                .replace('\\', "/")
+                .to_ascii_lowercase();
+            if !seen.insert(key) {
+                return Err(ApplyError::UnsafePath(
+                    relative.to_string_lossy().into_owned(),
+                ));
+            }
+        }
         let transaction = tempfile::Builder::new()
             .prefix(".control-")
             .tempdir_in(&self.root)
