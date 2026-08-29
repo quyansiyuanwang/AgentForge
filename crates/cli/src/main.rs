@@ -1028,6 +1028,12 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         .and_then(|name| name.to_str())
         .unwrap_or("project")
         .to_owned();
+    let report = DetectionEngine::with_builtins().detect(&DetectionContext {
+        root: &root,
+        filesystem: &RealFileSystem,
+    });
+    let context_path = PathBuf::from(".agentforge/generated/project-context.md");
+    let context_content = project_context(&report.profile);
     let skills = args
         .skills
         .iter()
@@ -1060,7 +1066,13 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         schema_version: "1".into(),
         project: agentforge_core::model::Project { name },
         targets: target_values.clone(),
-        instructions: vec![],
+        instructions: vec![agentforge_core::model::Content {
+            id: "agentforge-context".into(),
+            source: agentforge_core::model::Source::Local {
+                path: context_path.to_string_lossy().replace('\\', "/"),
+            },
+            applies_to: vec![],
+        }],
         skills,
         mcp,
         subagents: vec![],
@@ -1073,10 +1085,6 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
     let previous_lock = std::fs::read(&lock_path).ok();
     let vendor_root = root.join(".agentforge/vendor");
     let previous_vendor = vendor_root.exists();
-    let report = DetectionEngine::with_builtins().detect(&DetectionContext {
-        root: &root,
-        filesystem: &RealFileSystem,
-    });
     if !args.dry_run {
         let empty_lock = LockFile::new(format!("agentforge {}", env!("CARGO_PKG_VERSION")), vec![])
             .map_err(runtime)?
@@ -1092,6 +1100,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                     PathBuf::from(".agentforge/lock.yaml"),
                     empty_lock.into_bytes(),
                 ),
+                (context_path.clone(), context_content.into_bytes()),
             ])
             .map_err(runtime)?;
         if spec
@@ -1251,7 +1260,9 @@ fn cli_source(value: &str) -> agentforge_core::model::Source {
 fn rollback_init_files(root: &Path, previous_lock: Option<&[u8]>, previous_vendor: bool) {
     let project = root.join(".agentforge/project.yaml");
     let lock = root.join(".agentforge/lock.yaml");
+    let context = root.join(".agentforge/generated/project-context.md");
     let _ = std::fs::remove_file(project);
+    let _ = std::fs::remove_file(context);
     match previous_lock {
         Some(bytes) => {
             let _ = std::fs::write(lock, bytes);
@@ -1281,6 +1292,19 @@ fn split_ref_version(value: &str) -> (&str, Option<&str>) {
                 (reference, Some(version))
             }
         })
+}
+
+fn project_context(profile: &agentforge_core::model::ProjectProfile) -> String {
+    format!(
+        "# AgentForge Project Context\n\n## Detected project facts\n- Languages: {}\n- Frameworks: {}\n- Databases: {}\n- Package managers: {}\n- Tests: {}\n- CI: {}\n- Tools: {}\n\n## Project commands\n- install: TODO (confirm the repository command)\n- build: TODO (confirm the repository command)\n- test: TODO (confirm the repository command)\n- lint: TODO (confirm the repository command)\n\n## Editing boundaries\n- Edit canonical sources and `.agentforge/project.yaml`; do not hand-edit generated target files.\n- Run `agentforge diff` before committing generated changes.\n- Move team-specific instructions, skills, MCP servers, and subagents into declared sources.\n",
+        join(&profile.languages),
+        join(&profile.frameworks),
+        join(&profile.databases),
+        join(&profile.package_managers),
+        join(&profile.tests),
+        join(&profile.ci),
+        join(&profile.tools)
+    )
 }
 
 fn compile(root: &Path) -> Result<Compilation, CliFailure> {

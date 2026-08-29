@@ -208,6 +208,10 @@ fn init_non_interactive_generates_spec_and_artifacts() {
     assert!(root.path().join(".agentforge/lock.yaml").exists());
     assert!(root.path().join("AGENTS.md").exists());
     assert!(root.path().join(".agentforge/manifest.json").exists());
+    let context =
+        fs::read_to_string(root.path().join(".agentforge/generated/project-context.md")).unwrap();
+    assert!(context.contains("Detected project facts"));
+    assert!(context.contains("Editing boundaries"));
 }
 
 #[test]
