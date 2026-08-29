@@ -639,7 +639,14 @@ fn update_resources(
                             source: &item.source,
                             allow_unpinned: false,
                             allow_executable_content: false,
-                            installed_vendor_bytes: 0,
+                            installed_vendor_bytes: existing
+                                .sources
+                                .iter()
+                                .filter(|entry| {
+                                    !(entry.kind == ContentKind::Skill && entry.id == item.id)
+                                })
+                                .map(|entry| entry.total_bytes)
+                                .sum(),
                         })
                         .await
                         .map_err(|error| error.to_string())?
@@ -671,7 +678,14 @@ fn update_resources(
                             source: item.1,
                             allow_unpinned: false,
                             allow_executable_content: false,
-                            installed_vendor_bytes: 0,
+                            installed_vendor_bytes: existing
+                                .sources
+                                .iter()
+                                .filter(|entry| {
+                                    !(entry.kind == ContentKind::Mcp && entry.id == item.0.id)
+                                })
+                                .map(|entry| entry.total_bytes)
+                                .sum(),
                         })
                         .await
                         .map_err(|error| error.to_string())?
