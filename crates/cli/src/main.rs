@@ -1026,9 +1026,7 @@ fn mutate_spec(
     let compilation = match compile(root) {
         Ok(compilation) => compilation,
         Err(error) => {
-            if let Err(restore_error) = restore_spec(root, &previous_rendered) {
-                return Err(restore_error);
-            }
+            restore_spec(root, &previous_rendered)?;
             return Err(error);
         }
     };
@@ -1062,9 +1060,7 @@ fn mutate_spec(
         }
         if compilation.plan.has_changes() {
             if let Err(error) = ApplicationService::new(root).apply(&compilation.plan) {
-                if let Err(restore_error) = restore_spec(root, &previous_rendered) {
-                    return Err(restore_error);
-                }
+                restore_spec(root, &previous_rendered)?;
                 return Err(runtime(error));
             }
         }
