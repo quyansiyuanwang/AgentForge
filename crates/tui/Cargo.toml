@@ -1,0 +1,12 @@
+[package]
+name = "agentforge-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+agentforge-core = { path = "../core" }
+crossterm.workspace = true
+ratatui.workspace = true
+

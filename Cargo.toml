@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/application", "crates/cli", "crates/compiler", "crates/core", "crates/detectors", "crates/sources", "crates/targets"]
+members = ["crates/application", "crates/cli", "crates/compiler", "crates/core", "crates/detectors", "crates/sources", "crates/targets", "crates/tui"]
 resolver = "2"
 
 [workspace.package]
@@ -24,3 +24,5 @@ sha2 = "0.10.9"
 tokio = { version = "1.47.1", features = ["process", "time"] }
 toml = "0.9.5"
 url = "2.5.4"
+ratatui = "0.29.0"
+crossterm = "0.28.1"

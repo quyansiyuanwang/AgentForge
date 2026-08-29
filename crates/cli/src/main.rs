@@ -464,40 +464,216 @@ fn resources(root: &Path, kind: &str, command: ResourceCommand) -> Result<Outcom
                 false,
             ))
         }
-        ResourceCommand::Add { value, dry_run } => pending_mutation(kind, "add", &value, dry_run),
-        ResourceCommand::Remove { id, dry_run } => pending_mutation(kind, "remove", &id, dry_run),
-        ResourceCommand::Update { id, dry_run } => {
-            pending_mutation(kind, "update", id.as_deref().unwrap_or("all"), dry_run)
+        ResourceCommand::Add { value, dry_run } => {
+            mutate_spec(root, &compilation.spec, kind, "add", &value, dry_run)
         }
+        ResourceCommand::Remove { id, dry_run } => {
+            mutate_spec(root, &compilation.spec, kind, "remove", &id, dry_run)
+        }
+        ResourceCommand::Update { id, dry_run } => mutate_spec(
+            root,
+            &compilation.spec,
+            kind,
+            "update",
+            id.as_deref().unwrap_or("all"),
+            dry_run,
+        ),
     }
 }
 
-fn pending_mutation(
+fn mutate_spec(
+    root: &Path,
+    current: &agentforge_core::model::ProjectSpec,
     kind: &str,
     operation: &str,
     value: &str,
-    _dry_run: bool,
+    dry_run: bool,
 ) -> Result<Outcome, CliFailure> {
-    Err(CliFailure {
-        message: format!("{kind} {operation} {value}: mutation workflow is not implemented yet"),
-        exit: 4,
-    })
+    use agentforge_core::model::{Content, Source};
+    let mut spec = current.clone();
+    let id = value
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(value)
+        .trim_end_matches(".md")
+        .to_lowercase();
+    match (kind, operation) {
+        ("skill", "add") => spec.skills.push(Content {
+            id,
+            source: Source::Local { path: value.into() },
+            applies_to: vec![],
+        }),
+        ("skill", "remove") => spec.skills.retain(|item| item.id != value),
+        ("mcp", "add") => spec.mcp.push(agentforge_core::model::Mcp {
+            id,
+            source: Some(Source::Local { path: value.into() }),
+            transport: None,
+            env: vec![],
+        }),
+        ("mcp", "remove") => spec.mcp.retain(|item| item.id != value),
+        ("subagent", "remove") => spec.subagents.retain(|item| item.id != value),
+        ("target", "add") => {
+            let target =
+                serde_yaml::from_str::<agentforge_core::model::Target>(&format!("{value}\n"))
+                    .map_err(internal)?;
+            if !spec.targets.contains(&target) {
+                spec.targets.push(target);
+            }
+        }
+        ("target", "remove") => {
+            spec.targets.retain(|target| target.as_str() != value);
+            if spec.targets.is_empty() {
+                return Err(CliFailure {
+                    message: "at least one target is required".into(),
+                    exit: 1,
+                });
+            }
+        }
+        (_, "update") => {
+            return Err(CliFailure {
+                message: "update requires an explicit source refresh command".into(),
+                exit: 2,
+            });
+        }
+        _ => {
+            return Err(CliFailure {
+                message: format!("unsupported {kind} {operation}"),
+                exit: 2,
+            });
+        }
+    }
+    let validation =
+        SpecValidator::new().validate_yaml(&serde_yaml::to_string(&spec).map_err(internal)?);
+    if !validation.is_valid() {
+        return Ok(outcome_value(
+            &format!("{kind} {operation}"),
+            json!({"valid":false}),
+            validation.diagnostics,
+            "Invalid".into(),
+            false,
+            true,
+        ));
+    }
+    let path = root.join(".agentforge/project.yaml");
+    let rendered = serde_yaml::to_string(&spec).map_err(internal)?;
+    if !dry_run {
+        std::fs::write(&path, rendered.as_bytes()).map_err(runtime)?;
+    }
+    Ok(outcome_value(
+        &format!("{kind} {operation}"),
+        json!({"path":path,"dryRun":dry_run,"changed":true}),
+        vec![],
+        if dry_run {
+            "Would update project spec".into()
+        } else {
+            "Updated project spec".into()
+        },
+        false,
+        false,
+    ))
 }
 fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
-    let _ = (
-        args.dry_run,
-        args.non_interactive,
-        args.strict,
-        args.targets,
-        args.skills,
-        args.mcp,
-        args.allow_unpinned_source,
-        args.allow_executable_content,
-    );
-    Err(CliFailure {
-        message: "init workflow is not implemented yet".into(),
-        exit: 4,
-    })
+    let root = repository_root().map_err(runtime)?;
+    let path = root.join(".agentforge/project.yaml");
+    if path.exists() {
+        return Err(CliFailure {
+            message: "project spec already exists; use sync or edit it explicitly".into(),
+            exit: 1,
+        });
+    }
+    if args.non_interactive && args.targets.is_empty() {
+        return Err(CliFailure {
+            message: "--non-interactive requires at least one --target".into(),
+            exit: 2,
+        });
+    }
+    let targets = if args.targets.is_empty() {
+        vec![TargetArg::Generic]
+    } else {
+        args.targets
+    };
+    let mut target_values = targets
+        .into_iter()
+        .map(|target| match target {
+            TargetArg::Generic => Target::Generic,
+            TargetArg::Codex => Target::Codex,
+            TargetArg::Claude => Target::Claude,
+            TargetArg::Copilot => Target::Copilot,
+        })
+        .collect::<Vec<_>>();
+    target_values.sort();
+    target_values.dedup();
+    if target_values.contains(&Target::Generic) && target_values.len() > 1 {
+        return Err(CliFailure {
+            message: "generic cannot be combined with vendor targets".into(),
+            exit: 1,
+        });
+    }
+    let name = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("project")
+        .to_owned();
+    let skills = args
+        .skills
+        .iter()
+        .map(|path| agentforge_core::model::Content {
+            id: path
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(path)
+                .trim_end_matches(".md")
+                .to_lowercase(),
+            source: agentforge_core::model::Source::Local { path: path.clone() },
+            applies_to: vec![],
+        })
+        .collect();
+    let mcp = args
+        .mcp
+        .iter()
+        .map(|path| agentforge_core::model::Mcp {
+            id: path
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(path)
+                .to_lowercase(),
+            source: Some(agentforge_core::model::Source::Local { path: path.clone() }),
+            transport: None,
+            env: vec![],
+        })
+        .collect();
+    let spec = agentforge_core::model::ProjectSpec {
+        schema_version: "agentforge/v0.1".into(),
+        project: agentforge_core::model::Project { name },
+        targets: target_values,
+        instructions: vec![],
+        skills,
+        mcp,
+        subagents: vec![],
+        settings: Default::default(),
+        extensions: Default::default(),
+    };
+    let rendered = serde_yaml::to_string(&spec).map_err(internal)?;
+    let report = DetectionEngine::with_builtins().detect(&DetectionContext {
+        root: &root,
+        filesystem: &RealFileSystem,
+    });
+    if !args.dry_run {
+        std::fs::create_dir_all(path.parent().expect("spec parent")).map_err(runtime)?;
+        std::fs::write(&path, rendered.as_bytes()).map_err(runtime)?;
+    }
+    Ok(outcome(
+        "init",
+        json!({"path":path,"dryRun":args.dry_run,"spec":spec,"facts":report.profile,"evidence":report.profile.evidence}),
+        report.diagnostics,
+        if args.dry_run {
+            "Would initialize project".into()
+        } else {
+            "Initialized project".into()
+        },
+        false,
+        false,
+    ))
 }
 
 fn compile(root: &Path) -> Result<Compilation, CliFailure> {
