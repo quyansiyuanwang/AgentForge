@@ -335,6 +335,49 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
     let lock_path = root.join(".agentforge/lock.yaml");
     let manifest_path = root.join(".agentforge/manifest.json");
     checks.push(json!({"check":"lock","path":lock_path,"healthy":lock_path.exists()}));
+    if let Ok(bytes) = std::fs::read(&lock_path) {
+        if let Ok(lock) = serde_yaml::from_slice::<LockFile>(&bytes) {
+            let mut referenced = std::collections::BTreeSet::new();
+            for item in &compilation.spec.instructions {
+                if !matches!(item.source, agentforge_core::model::Source::Local { .. }) {
+                    referenced.insert((ContentKind::Instruction, item.id.clone()));
+                }
+            }
+            for item in &compilation.spec.skills {
+                if !matches!(item.source, agentforge_core::model::Source::Local { .. }) {
+                    referenced.insert((ContentKind::Skill, item.id.clone()));
+                }
+            }
+            for item in &compilation.spec.mcp {
+                if let Some(source) = &item.source {
+                    if !matches!(source, agentforge_core::model::Source::Local { .. }) {
+                        referenced.insert((ContentKind::Mcp, item.id.clone()));
+                    }
+                }
+            }
+            for item in &compilation.spec.subagents {
+                if !matches!(
+                    item.instructions,
+                    agentforge_core::model::Source::Local { .. }
+                ) {
+                    referenced.insert((ContentKind::Subagent, item.id.clone()));
+                }
+            }
+            let stale = lock
+                .sources
+                .iter()
+                .filter(|entry| !referenced.contains(&(entry.kind, entry.id.clone())))
+                .map(|entry| format!("{:?}/{}", entry.kind, entry.id))
+                .collect::<Vec<_>>();
+            checks.push(json!({"check":"lockReferences","healthy":stale.is_empty(),"stale":stale}));
+            if !stale.is_empty() {
+                compilation.diagnostics.push(Diagnostic::warning(
+                    DiagnosticCode::UnknownReference,
+                    format!("lock contains stale sources: {}", stale.join(", ")),
+                ));
+            }
+        }
+    }
     checks.push(json!({"check":"vendor","healthy":true,"verified":"offline"}));
     let manifest = std::fs::read(&manifest_path).ok().and_then(|bytes| {
         serde_json::from_slice::<agentforge_core::planning::Manifest>(&bytes).ok()
