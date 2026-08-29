@@ -59,6 +59,8 @@ pub enum SourceError {
     InvalidSkillsReference(String),
     #[error("invalid MCP registry response: {0}")]
     InvalidRegistryResponse(String),
+    #[error("invalid MCP registry reference: {0}")]
+    InvalidRegistryReference(String),
     #[error("source checksum mismatch: expected {expected}, actual {actual}")]
     ChecksumMismatch { expected: String, actual: String },
     #[error("third-party executable content requires explicit authorization")]
@@ -251,9 +253,26 @@ impl<H: HttpFetcher, G: GitFetcher> SourceService<H, G> {
         reference: &str,
         version: Option<&str>,
     ) -> Result<ResolvedSource, SourceError> {
+        if reference.is_empty()
+            || reference
+                .split('/')
+                .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+            || reference.chars().any(|character| character.is_control())
+        {
+            return Err(SourceError::InvalidRegistryReference(reference.into()));
+        }
         let requested_version = version
             .or(request.allow_unpinned.then_some("latest"))
             .ok_or_else(|| SourceError::Unpinned(reference.into()))?;
+        if requested_version.is_empty()
+            || requested_version
+                .chars()
+                .any(|character| character.is_control())
+        {
+            return Err(SourceError::InvalidRegistryReference(format!(
+                "{reference}@{requested_version}"
+            )));
+        }
         let mut url = url::Url::parse(&self.mcp_registry_base).map_err(SourceError::InvalidUrl)?;
         {
             let mut segments = url.path_segments_mut().map_err(|_| {

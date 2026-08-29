@@ -198,3 +198,41 @@ async fn mcp_registry_locks_actual_version() {
     assert_eq!(lock.resolved_version.as_deref(), Some("1.2.3"));
     assert_eq!(vendor.files[0].path, "server.json");
 }
+
+#[tokio::test]
+async fn mcp_registry_rejects_unsafe_reference_before_network() {
+    for reference in [
+        "",
+        "../server",
+        "io.example//server",
+        "io.example/\u{7f}server",
+    ] {
+        let source = Source::McpRegistry {
+            r#ref: reference.into(),
+            version: Some("1.0.0".into()),
+        };
+        let (client, calls) = http(br#"{}"#, "https://registry.example/resolved");
+        let mut input = request(&source);
+        input.kind = ContentKind::Mcp;
+        let result = SourceService::new(client, Git).resolve(input).await;
+        assert!(matches!(
+            result,
+            Err(SourceError::InvalidRegistryReference(_))
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    let source = Source::McpRegistry {
+        r#ref: "io.example/server".into(),
+        version: Some("".into()),
+    };
+    let (client, calls) = http(br#"{}"#, "https://registry.example/resolved");
+    let mut input = request(&source);
+    input.kind = ContentKind::Mcp;
+    let result = SourceService::new(client, Git).resolve(input).await;
+    assert!(matches!(
+        result,
+        Err(SourceError::InvalidRegistryReference(_))
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
