@@ -1282,3 +1282,16 @@ fn internal(error: impl std::fmt::Display) -> CliFailure {
         exit: 4,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::redact_text;
+
+    #[test]
+    fn sensitive_diff_lines_are_redacted() {
+        let output = redact_text("command: safe\nGITHUB_TOKEN=do-not-print\nnext: value");
+        assert!(!output.contains("do-not-print"));
+        assert!(output.contains("[REDACTED SENSITIVE LINE]"));
+        assert!(output.contains("command: safe"));
+    }
+}
