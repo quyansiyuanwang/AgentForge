@@ -48,6 +48,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 架构、扩展点和发布流程见 [docs/README.md](docs/README.md)。项目规格草案位于本地 `docs/goal/`，按策略被 `.gitignore` 忽略，不作为发布文档。
 
+当前实现边界和后续工作见 [实现状态与交接](docs/implementation-status.md)。
+
 ## 许可证
 
 AgentForge 采用 Apache License 2.0，见 [LICENSE](LICENSE)。第三方依赖和外部 skill/MCP 内容遵循其各自许可证。
