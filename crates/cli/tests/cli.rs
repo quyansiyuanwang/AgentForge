@@ -207,6 +207,40 @@ fn init_non_interactive_requires_explicit_target() {
 }
 
 #[test]
+fn init_dry_run_reports_planned_artifacts_without_writing() {
+    let root = tempfile::tempdir().unwrap();
+    let output = cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args([
+            "init",
+            "--non-interactive",
+            "--target",
+            "codex",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(!root.path().join(".agentforge/project.yaml").exists());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        value["data"]["plannedArtifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "AGENTS.md")
+    );
+    assert!(
+        value["data"]["plannedArtifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == ".codex/config.toml")
+    );
+}
+
+#[test]
 fn init_three_vendor_targets_is_idempotent() {
     let root = tempfile::tempdir().unwrap();
     cargo_bin_cmd!("agentforge")

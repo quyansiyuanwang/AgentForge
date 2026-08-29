@@ -856,6 +856,20 @@ fn mutate_spec(
     }
     let path = root.join(".agentforge/project.yaml");
     let rendered = serde_yaml::to_string(&spec).map_err(internal)?;
+    let planned_artifacts = spec
+        .targets
+        .iter()
+        .flat_map(|target| match target {
+            Target::Generic => vec![
+                "AGENTS.md",
+                ".agentforge/generated/settings.yaml",
+                ".agentforge/generated/mcp.json",
+            ],
+            Target::Codex => vec!["AGENTS.md", ".codex/config.toml"],
+            Target::Claude => vec!["CLAUDE.md", ".mcp.json", ".claude/settings.json"],
+            Target::Copilot => vec![".github/copilot-instructions.md", ".github/mcp.json"],
+        })
+        .collect::<Vec<_>>();
     let summary = json!({
         "operation": operation,
         "resource": kind,
@@ -1087,7 +1101,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
     };
     Ok(outcome(
         "init",
-        json!({"path":path,"dryRun":args.dry_run,"spec":spec,"facts":report.profile,"evidence":report.profile.evidence}),
+        json!({"path":path,"dryRun":args.dry_run,"spec":spec,"facts":report.profile,"evidence":report.profile.evidence,"plannedArtifacts":planned_artifacts}),
         report.diagnostics,
         std::mem::take(&mut human),
         args.json,
