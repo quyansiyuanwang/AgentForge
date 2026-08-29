@@ -146,6 +146,22 @@ async fn skills_require_pin_then_lock_commit() {
 }
 
 #[tokio::test]
+async fn git_head_requires_explicit_unpinned_authorization() {
+    let source = Source::Git {
+        repository: "https://github.com/owner/repo.git".into(),
+        rev: "HEAD".into(),
+        subpath: None,
+    };
+    let (client, _) = http(b"", "https://example.com");
+    assert!(matches!(
+        SourceService::new(client, Git)
+            .resolve(request(&source))
+            .await,
+        Err(SourceError::Unpinned(_))
+    ));
+}
+
+#[tokio::test]
 async fn mcp_registry_locks_actual_version() {
     let source = Source::McpRegistry {
         r#ref: "io.example/server".into(),

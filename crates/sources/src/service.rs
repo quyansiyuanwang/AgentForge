@@ -188,6 +188,10 @@ impl<H: HttpFetcher, G: GitFetcher> SourceService<H, G> {
         subpath: Option<&str>,
         requested: String,
     ) -> Result<ResolvedSource, SourceError> {
+        if matches!(rev.to_ascii_lowercase().as_str(), "head" | "latest") && !request.allow_unpinned
+        {
+            return Err(SourceError::Unpinned(requested));
+        }
         let result = self
             .git
             .fetch(repository, rev, subpath, self.limits)
