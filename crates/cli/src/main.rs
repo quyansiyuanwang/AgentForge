@@ -734,16 +734,27 @@ fn update_resources(
                 }
             }
             if !dry_run {
-                write_vendor_batch(root, &pending_vendor)?;
                 let lock =
                     LockFile::new(format!("agentforge {}", env!("CARGO_PKG_VERSION")), entries)
                         .map_err(|error| error.to_string())?;
                 let yaml = lock.to_yaml().map_err(|error| error.to_string())?;
-                ApplicationService::new(root)
-                    .apply_control_files(&[(
+                let files = pending_vendor
+                    .into_iter()
+                    .flat_map(|(vendor_path, vendor)| {
+                        vendor.files.into_iter().map(move |file| {
+                            (
+                                PathBuf::from(format!("{vendor_path}/{}", file.path)),
+                                file.content,
+                            )
+                        })
+                    })
+                    .chain(std::iter::once((
                         PathBuf::from(".agentforge/lock.yaml"),
                         yaml.into_bytes(),
-                    )])
+                    )))
+                    .collect::<Vec<_>>();
+                ApplicationService::new(root)
+                    .apply_control_files(&files)
                     .map_err(|error| error.to_string())?;
             }
             Ok::<_, String>(changed)
@@ -761,89 +772,6 @@ fn update_resources(
         json_output,
         false,
     ))
-}
-
-fn write_vendor_batch(
-    root: &Path,
-    vendors: &[(String, agentforge_sources::VendorTree)],
-) -> Result<(), String> {
-    let batch = root
-        .join(".agentforge")
-        .join(format!(".batch-staging-{}", std::process::id()));
-    if batch.exists() {
-        std::fs::remove_dir_all(&batch).map_err(|error| error.to_string())?;
-    }
-    std::fs::create_dir_all(&batch).map_err(|error| error.to_string())?;
-    let mut cleanup = BatchCleanup {
-        path: batch.clone(),
-        keep: false,
-    };
-    let mut staged = Vec::new();
-    for (index, (vendor_path, vendor)) in vendors.iter().enumerate() {
-        let stage = batch.join(index.to_string());
-        std::fs::create_dir_all(&stage).map_err(|error| error.to_string())?;
-        for file in &vendor.files {
-            let path = stage.join(file.path.replace('/', std::path::MAIN_SEPARATOR_STR));
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-            }
-            std::fs::write(path, &file.content).map_err(|error| error.to_string())?;
-        }
-        staged.push((vendor_path.clone(), stage));
-    }
-    let mut backups = Vec::new();
-    let mut committed = Vec::new();
-    for (index, (vendor_path, stage)) in staged.iter().enumerate() {
-        let target = root.join(vendor_path.replace('/', std::path::MAIN_SEPARATOR_STR));
-        let backup = batch.join(format!("backup-{index}"));
-        if target.exists() {
-            if let Err(error) = std::fs::rename(&target, &backup) {
-                rollback_vendor_batch(&committed, &backups);
-                return Err(error.to_string());
-            }
-            backups.push((target.clone(), backup.clone()));
-        }
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        if let Err(error) = std::fs::rename(stage, &target) {
-            rollback_vendor_batch(&committed, &backups);
-            return Err(error.to_string());
-        }
-        committed.push(target);
-    }
-    for (_, backup) in backups {
-        let _ = std::fs::remove_dir_all(backup);
-    }
-    cleanup.keep = true;
-    let _ = std::fs::remove_dir_all(batch);
-    Ok(())
-}
-
-struct BatchCleanup {
-    path: PathBuf,
-    keep: bool,
-}
-
-impl Drop for BatchCleanup {
-    fn drop(&mut self) {
-        if !self.keep && self.path.exists() {
-            let _ = std::fs::remove_dir_all(&self.path);
-        }
-    }
-}
-
-fn rollback_vendor_batch(committed: &[PathBuf], backups: &[(PathBuf, PathBuf)]) {
-    for target in committed {
-        if target.exists() {
-            let _ = std::fs::remove_dir_all(target);
-        }
-    }
-    for (target, backup) in backups.iter().rev() {
-        if backup.exists() {
-            let _ = std::fs::rename(backup, target);
-        }
-    }
 }
 
 fn mutate_spec(
