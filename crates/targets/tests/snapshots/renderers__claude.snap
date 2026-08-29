@@ -1,0 +1,63 @@
+---
+source: crates/targets/tests/renderers.rs
+expression: snapshot(&output)
+---
+===== CLAUDE.md [claude@1] =====
+# Claude Code Instructions
+
+Project: `fixture-app`
+
+## project
+
+Run tests before committing.
+===== .claude/skills/testing/SKILL.md [claude@1] =====
+---
+name: testing
+---
+Test carefully.
+===== .mcp.json [claude@1] =====
+{
+  "mcpServers": {
+    "github": {
+      "args": [
+        "stdio"
+      ],
+      "command": "github-mcp-server",
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "type": "stdio"
+    }
+  }
+}
+===== .claude/settings.json [claude@1] =====
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "scripts/validate --all",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "model": "sonnet",
+  "permissions": {
+    "defaultMode": "default"
+  },
+  "sandbox": {
+    "enabled": true
+  }
+}
+===== .claude/agents/reviewer.md [claude@1] =====
+---
+description: Review correctness and security
+name: reviewer
+skills:
+- testing
+---
+
+Inspect the diff and report findings.

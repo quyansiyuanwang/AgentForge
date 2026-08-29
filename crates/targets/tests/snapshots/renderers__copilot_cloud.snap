@@ -1,0 +1,40 @@
+---
+source: crates/targets/tests/renderers.rs
+expression: snapshot(&output)
+---
+===== .github/copilot-instructions.md [copilot@1] =====
+# GitHub Copilot Instructions
+
+Project: `fixture-app`
+
+## project
+
+Run tests before committing.
+===== .github/skills/testing/SKILL.md [copilot@1] =====
+---
+name: testing
+---
+Test carefully.
+===== .github/agents/reviewer.agent.md [copilot@1] =====
+---
+description: Review correctness and security
+name: reviewer
+---
+
+Inspect the diff and report findings.
+===== MANUAL configure-cloud-mcp =====
+{
+  "mcpServers": {
+    "github": {
+      "args": [
+        "stdio"
+      ],
+      "command": "github-mcp-server",
+      "env": {
+        "GITHUB_TOKEN": "${COPILOT_MCP_GITHUB_TOKEN}"
+      },
+      "type": "stdio"
+    }
+  }
+}
+ENV: COPILOT_MCP_GITHUB_TOKEN

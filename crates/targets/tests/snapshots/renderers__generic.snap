@@ -1,0 +1,52 @@
+---
+source: crates/targets/tests/renderers.rs
+expression: snapshot(&output)
+---
+===== AGENTS.md [generic@1] =====
+# Agent Instructions
+
+Project: `fixture-app`
+
+## project
+
+Run tests before committing.
+===== .agents/skills/testing/SKILL.md [generic@1] =====
+---
+name: testing
+---
+Test carefully.
+===== .agentforge/generated/mcp.json [generic@1] =====
+{
+  "mcpServers": {
+    "github": {
+      "args": [
+        "stdio"
+      ],
+      "command": "github-mcp-server",
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "type": "stdio"
+    }
+  }
+}
+===== .agentforge/generated/settings.yaml [generic@1] =====
+permissions:
+  shell: ask
+  network: allow
+sandbox: workspace-write
+modelProfile: null
+hooks:
+- id: validate
+  event: post-tool
+  command: scripts/validate
+  args:
+  - --all
+  env: []
+===== .agentforge/generated/subagents/reviewer.md [generic@1] =====
+---
+description: Review correctness and security
+skills: testing
+---
+
+Inspect the diff and report findings.
