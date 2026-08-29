@@ -315,7 +315,21 @@ fn diff(root: &Path, json_output: bool) -> Result<Outcome, CliFailure> {
 }
 
 fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
-    let mut compilation = compile(root)?;
+    let mut compilation = match compile(root) {
+        Ok(compilation) => compilation,
+        Err(error) => {
+            let message = error.to_string();
+            let diagnostic = Diagnostic::error(DiagnosticCode::IoFailure, message.clone());
+            return Ok(outcome_value(
+                "doctor",
+                json!({"health":"Unhealthy","checks":[{"check":"compile","healthy":false,"error":message}]}),
+                vec![diagnostic],
+                "Unhealthy".into(),
+                args.json,
+                true,
+            ));
+        }
+    };
     let mut checks = Vec::new();
     let lock_path = root.join(".agentforge/lock.yaml");
     let manifest_path = root.join(".agentforge/manifest.json");
