@@ -258,4 +258,10 @@ fn control_files_replace_atomically_and_restore_on_invalid_path() {
         fs::read(root.path().join(".agentforge/project.yaml")).unwrap(),
         b"new"
     );
+    let leftovers = fs::read_dir(root.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with(".control-"))
+        .count();
+    assert_eq!(leftovers, 0);
 }
