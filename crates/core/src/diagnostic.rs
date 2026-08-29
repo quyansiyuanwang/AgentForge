@@ -36,6 +36,16 @@ pub enum DiagnosticCode {
     UndeclaredEnvironmentVariable,
     #[serde(rename = "AF1110")]
     UrlContainsCredentials,
+    #[serde(rename = "AF1201")]
+    UnsupportedCapability,
+    #[serde(rename = "AF1202")]
+    ManualActionRequired,
+    #[serde(rename = "AF1301")]
+    ArtifactConflict,
+    #[serde(rename = "AF1302")]
+    ArtifactDrift,
+    #[serde(rename = "AF1303")]
+    DuplicateArtifactOwner,
     #[serde(rename = "AF2001")]
     DetectorFailure,
     #[serde(rename = "AF2002")]
@@ -59,6 +69,11 @@ impl DiagnosticCode {
             Self::UnsafePath => "AF1108",
             Self::UndeclaredEnvironmentVariable => "AF1109",
             Self::UrlContainsCredentials => "AF1110",
+            Self::UnsupportedCapability => "AF1201",
+            Self::ManualActionRequired => "AF1202",
+            Self::ArtifactConflict => "AF1301",
+            Self::ArtifactDrift => "AF1302",
+            Self::DuplicateArtifactOwner => "AF1303",
             Self::DetectorFailure => "AF2001",
             Self::MalformedDetectionInput => "AF2002",
             Self::IoFailure => "AF3001",

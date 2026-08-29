@@ -3,6 +3,8 @@
 pub mod diagnostic;
 pub mod filesystem;
 pub mod model;
+pub mod planning;
+pub mod resolver;
 pub mod validation;
 
 pub use diagnostic::{Diagnostic, DiagnosticCode, Severity};
