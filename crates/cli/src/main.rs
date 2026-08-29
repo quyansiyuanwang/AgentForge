@@ -522,7 +522,7 @@ fn config(root: &Path, command: ConfigCommand) -> Result<Outcome, CliFailure> {
 
 fn resources(root: &Path, kind: &str, command: ResourceCommand) -> Result<Outcome, CliFailure> {
     if let ResourceCommand::Update { id, dry_run, json } = &command {
-        return update_resources(root, kind, id.as_deref(), *dry_run, *json);
+        return update_resources(root, kind, id.as_deref(), *dry_run, *json, false, false);
     }
     let spec = load_spec(root)?;
     match command {
@@ -591,6 +591,8 @@ fn update_resources(
     selected: Option<&str>,
     dry_run: bool,
     json_output: bool,
+    allow_unpinned: bool,
+    allow_executable_content: bool,
 ) -> Result<Outcome, CliFailure> {
     if !matches!(kind, "skill" | "mcp") {
         return Err(CliFailure {
@@ -637,8 +639,8 @@ fn update_resources(
                             kind: ContentKind::Skill,
                             id: &item.id,
                             source: &item.source,
-                            allow_unpinned: false,
-                            allow_executable_content: false,
+                            allow_unpinned,
+                            allow_executable_content,
                             installed_vendor_bytes: existing
                                 .sources
                                 .iter()
@@ -676,8 +678,8 @@ fn update_resources(
                             kind: ContentKind::Mcp,
                             id: &item.0.id,
                             source: item.1,
-                            allow_unpinned: false,
-                            allow_executable_content: false,
+                            allow_unpinned,
+                            allow_executable_content,
                             installed_vendor_bytes: existing
                                 .sources
                                 .iter()
@@ -1002,7 +1004,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 .unwrap_or(path)
                 .trim_end_matches(".md")
                 .to_lowercase(),
-            source: agentforge_core::model::Source::Local { path: path.clone() },
+            source: cli_source(path),
             applies_to: vec![],
         })
         .collect();
@@ -1015,7 +1017,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 .next()
                 .unwrap_or(path)
                 .to_lowercase(),
-            source: Some(agentforge_core::model::Source::Local { path: path.clone() }),
+            source: Some(cli_source(path)),
             transport: None,
             env: vec![],
         })
@@ -1038,6 +1040,36 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
     });
     if !args.dry_run {
         atomic_write(&path, rendered.as_bytes()).map_err(runtime)?;
+        if spec
+            .skills
+            .iter()
+            .any(|item| !matches!(item.source, agentforge_core::model::Source::Local { .. }))
+        {
+            update_resources(
+                &root,
+                "skill",
+                None,
+                false,
+                args.json,
+                args.allow_unpinned_source,
+                args.allow_executable_content,
+            )?;
+        }
+        if spec.mcp.iter().any(|item| {
+            item.source.as_ref().is_some_and(|source| {
+                !matches!(source, agentforge_core::model::Source::Local { .. })
+            })
+        }) {
+            update_resources(
+                &root,
+                "mcp",
+                None,
+                false,
+                args.json,
+                args.allow_unpinned_source,
+                args.allow_executable_content,
+            )?;
+        }
     }
     let mut human = if args.dry_run {
         "Would initialize project".to_owned()
@@ -1076,6 +1108,17 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         args.json,
         false,
     ))
+}
+
+fn cli_source(value: &str) -> agentforge_core::model::Source {
+    if value.starts_with("https://") {
+        agentforge_core::model::Source::Url {
+            url: value.into(),
+            sha256: None,
+        }
+    } else {
+        agentforge_core::model::Source::Local { path: value.into() }
+    }
 }
 
 fn compile(root: &Path) -> Result<Compilation, CliFailure> {
