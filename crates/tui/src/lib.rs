@@ -12,6 +12,7 @@ use std::io;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Intent {
     SelectTargets(Vec<Target>),
+    ToggleTarget(Target),
     Confirm,
     Cancel,
     Resize { width: u16, height: u16 },
@@ -35,6 +36,13 @@ impl FlowState {
     pub fn reduce(self, intent: Intent) -> Self {
         match (self, intent) {
             (Self::Selecting { .. }, Intent::SelectTargets(targets)) => Self::Reviewing { targets },
+            (Self::Selecting { targets }, Intent::ToggleTarget(target)) => Self::Selecting {
+                targets: toggle_target(targets, target),
+            },
+            (Self::Reviewing { targets }, Intent::ToggleTarget(target)) => Self::Reviewing {
+                targets: toggle_target(targets, target),
+            },
+            (Self::Selecting { targets }, Intent::Confirm) => Self::Reviewing { targets },
             (Self::Reviewing { targets }, Intent::Confirm) => Self::Confirmed { targets },
             (Self::Selecting { .. } | Self::Reviewing { .. }, Intent::Cancel) => Self::Cancelled,
             (state, Intent::Resize { .. }) => state,
@@ -122,16 +130,16 @@ pub fn run_target_selection() -> io::Result<FlowState> {
             let event = event::read()?;
             let intent = match event {
                 Event::Key(key) if key.code == KeyCode::Char('1') => {
-                    Some(Intent::SelectTargets(vec![Target::Generic]))
+                    Some(Intent::ToggleTarget(Target::Generic))
                 }
                 Event::Key(key) if key.code == KeyCode::Char('2') => {
-                    Some(Intent::SelectTargets(vec![Target::Codex]))
+                    Some(Intent::ToggleTarget(Target::Codex))
                 }
                 Event::Key(key) if key.code == KeyCode::Char('3') => {
-                    Some(Intent::SelectTargets(vec![Target::Claude]))
+                    Some(Intent::ToggleTarget(Target::Claude))
                 }
                 Event::Key(key) if key.code == KeyCode::Char('4') => {
-                    Some(Intent::SelectTargets(vec![Target::Copilot]))
+                    Some(Intent::ToggleTarget(Target::Copilot))
                 }
                 other => intent_from_event(other),
             };
@@ -164,6 +172,24 @@ fn target_names(targets: &[Target]) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     }
+}
+
+fn toggle_target(mut targets: Vec<Target>, target: Target) -> Vec<Target> {
+    if target == Target::Generic {
+        return if targets.contains(&target) {
+            Vec::new()
+        } else {
+            vec![target]
+        };
+    }
+    targets.retain(|item| *item != Target::Generic);
+    if let Some(index) = targets.iter().position(|item| *item == target) {
+        targets.remove(index);
+    } else {
+        targets.push(target);
+    }
+    targets.sort();
+    targets
 }
 
 /// Renders a deterministic preview frame for both the interactive terminal and snapshot tests.
@@ -207,6 +233,30 @@ mod tests {
         assert_eq!(
             FlowState::new().reduce(Intent::Cancel),
             FlowState::Cancelled
+        );
+    }
+
+    #[test]
+    fn target_toggle_supports_multi_vendor_and_generic_exclusion() {
+        let state = FlowState::new()
+            .reduce(Intent::ToggleTarget(Target::Codex))
+            .reduce(Intent::ToggleTarget(Target::Claude))
+            .reduce(Intent::Confirm)
+            .reduce(Intent::Confirm);
+        assert_eq!(
+            state,
+            FlowState::Confirmed {
+                targets: vec![Target::Codex, Target::Claude]
+            }
+        );
+        let state = FlowState::new()
+            .reduce(Intent::ToggleTarget(Target::Generic))
+            .reduce(Intent::ToggleTarget(Target::Codex));
+        assert_eq!(
+            state,
+            FlowState::Selecting {
+                targets: vec![Target::Codex]
+            }
         );
     }
 
