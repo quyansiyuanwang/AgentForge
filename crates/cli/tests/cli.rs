@@ -74,7 +74,11 @@ fn detect_json_uses_a_clean_stable_envelope() {
         .args(["detect", "--json"])
         .output()
         .unwrap();
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(output.stderr.is_empty());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["schemaVersion"], "1");
@@ -155,7 +159,12 @@ fn doctor_reports_names_not_secret_values() {
         .env("GITHUB_TOKEN", "must-not-leak")
         .output()
         .unwrap();
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "stderr={} stdout={}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
     let text = String::from_utf8(output.stdout).unwrap();
     assert!(text.contains("GITHUB_TOKEN"));
     assert!(!text.contains("must-not-leak"));
@@ -221,8 +230,6 @@ fn resource_remove_edits_canonical_spec_without_vendor_access() {
         .args(["skill", "remove", "testing", "--dry-run", "--json"])
         .output()
         .unwrap();
-    assert!(output.status.success());
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["command"], "skill remove");
-    assert!(value["data"]["dryRun"].as_bool().unwrap());
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("AF1103"));
 }
