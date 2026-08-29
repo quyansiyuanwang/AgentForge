@@ -205,6 +205,21 @@ fn doctor_reports_names_not_secret_values() {
             .unwrap()
             .starts_with("Healthy")
     );
+    let mcp = value["data"]["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["check"] == "mcpSecurity")
+        .unwrap();
+    assert_eq!(mcp["servers"][0]["id"], "github");
+    assert_eq!(mcp["servers"][0]["environment"][0], "GITHUB_TOKEN");
+    assert!(
+        mcp["servers"][0]["transport"]
+            .as_str()
+            .unwrap()
+            .contains("github-mcp-server")
+    );
+    assert_eq!(mcp["servers"][0]["networkPermission"], "Some(Ask)");
 }
 
 #[test]
