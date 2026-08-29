@@ -928,6 +928,13 @@ fn mutate_spec(
     }
     let path = root.join(".agentforge/project.yaml");
     let rendered = serde_yaml::to_string(&spec).map_err(internal)?;
+    let summary = json!({
+        "operation": operation,
+        "resource": kind,
+        "id": value,
+        "beforeCount": resource_count(current, kind),
+        "afterCount": resource_count(&spec, kind),
+    });
     if !dry_run {
         ApplicationService::new(root)
             .apply_control_files(&[(
@@ -938,7 +945,7 @@ fn mutate_spec(
     }
     Ok(outcome_value(
         &format!("{kind} {operation}"),
-        json!({"path":path,"dryRun":dry_run,"changed":true}),
+        json!({"path":path,"dryRun":dry_run,"changed":true,"summary":summary}),
         vec![],
         if dry_run {
             "Would update project spec".into()
@@ -948,6 +955,16 @@ fn mutate_spec(
         json_output,
         false,
     ))
+}
+
+fn resource_count(spec: &agentforge_core::model::ProjectSpec, kind: &str) -> usize {
+    match kind {
+        "skill" => spec.skills.len(),
+        "mcp" => spec.mcp.len(),
+        "subagent" => spec.subagents.len(),
+        "target" => spec.targets.len(),
+        _ => 0,
+    }
 }
 
 fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
