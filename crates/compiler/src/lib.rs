@@ -53,6 +53,10 @@ pub enum CompileError {
     InvalidSpec(Vec<Diagnostic>),
     #[error("lock file is invalid: {0}")]
     InvalidLock(serde_yaml::Error),
+    #[error("lock file schema version is unsupported: {0}")]
+    UnsupportedLockVersion(String),
+    #[error("lock file contains duplicate entries: {0:?}/{1}")]
+    DuplicateLockEntry(ContentKind, String),
     #[error("manifest is invalid: {0}")]
     InvalidManifest(serde_json::Error),
     #[error("vendor verification failed: {0}")]
@@ -98,7 +102,17 @@ impl ProjectCompiler {
         let lock = if lock_bytes.is_empty() {
             LockFile::new(format!("agentforge {}", env!("CARGO_PKG_VERSION")), vec![])?
         } else {
-            serde_yaml::from_slice(&lock_bytes).map_err(CompileError::InvalidLock)?
+            let parsed = serde_yaml::from_slice::<LockFile>(&lock_bytes)
+                .map_err(CompileError::InvalidLock)?;
+            if parsed.schema_version != "1" {
+                return Err(CompileError::UnsupportedLockVersion(parsed.schema_version));
+            }
+            LockFile::new(parsed.generated_by, parsed.sources).map_err(|error| match error {
+                agentforge_sources::SourceError::DuplicateLockEntry { kind, id } => {
+                    CompileError::DuplicateLockEntry(kind, id)
+                }
+                other => CompileError::Vendor(other),
+            })?
         };
         verify_vendor_offline(&self.root, &lock, VendorLimits::default())?;
         let previous = read_optional(&self.root.join(MANIFEST_PATH))?

@@ -158,3 +158,38 @@ fn repeated_offline_compilation_is_byte_stable() {
         assert_eq!(desired_bytes(&compilation), expected);
     }
 }
+
+#[test]
+fn lock_schema_and_entries_are_validated_before_rendering() {
+    let repository = tempfile::tempdir().unwrap();
+    setup(repository.path());
+    let lock_path = repository.path().join(".agentforge/lock.yaml");
+    fs::write(
+        &lock_path,
+        "schemaVersion: '2'\ngeneratedBy: agentforge 0.1.0\nsources: []\n",
+    )
+    .unwrap();
+    let error = ProjectCompiler::new(repository.path())
+        .compile()
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        agentforge_compiler::CompileError::UnsupportedLockVersion(version) if version == "2"
+    ));
+
+    fs::write(
+        &lock_path,
+        "schemaVersion: '1'\ngeneratedBy: agentforge 0.1.0\nsources:\n  - kind: skill\n    id: testing\n    sourceType: git\n    requestedLocator: x\n    resolvedLocator: y\n    vendorPath: .agentforge/vendor/skills/testing\n    sha256: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n    executableContent: false\n    fileCount: 0\n    totalBytes: 0\n  - kind: skill\n    id: testing\n    sourceType: git\n    requestedLocator: x\n    resolvedLocator: y\n    vendorPath: .agentforge/vendor/skills/testing\n    sha256: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n    executableContent: false\n    fileCount: 0\n    totalBytes: 0\n",
+    )
+    .unwrap();
+    let error = ProjectCompiler::new(repository.path())
+        .compile()
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        agentforge_compiler::CompileError::DuplicateLockEntry(
+            agentforge_sources::ContentKind::Skill,
+            id
+        ) if id == "testing"
+    ));
+}

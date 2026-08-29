@@ -1946,6 +1946,8 @@ fn compile(root: &Path) -> Result<Compilation, CliFailure> {
             CompileError::MissingFile(_)
             | CompileError::MissingLock { .. }
             | CompileError::InvalidLock(_)
+            | CompileError::UnsupportedLockVersion(_)
+            | CompileError::DuplicateLockEntry(..)
             | CompileError::InvalidManifest(_)
             | CompileError::Vendor(_)
             | CompileError::InvalidLocalPath(_)
