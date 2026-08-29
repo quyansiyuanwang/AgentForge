@@ -879,8 +879,10 @@ fn update_resources(
         })
         .map_err(|message| CliFailure { message, exit: 3 })?;
     let mut generated_preview = String::new();
+    let mut generated_changes = Value::Array(Vec::new());
     if apply_targets && !dry_run {
         let compilation = compile(root)?;
+        generated_changes = changes_json(&compilation);
         if compilation.blocks_apply(false) {
             let preview = human_diff(&compilation);
             return Ok(outcome_value(
@@ -913,7 +915,7 @@ fn update_resources(
     };
     Ok(outcome_value(
         &format!("{kind} update"),
-        json!({"updated":updated,"dryRun":dry_run}),
+        json!({"updated":updated,"dryRun":dry_run,"changes":generated_changes}),
         vec![],
         human,
         json_output,
