@@ -14,6 +14,8 @@ use agentforge_core::{
     validation::SpecValidator,
 };
 use agentforge_detectors::{DetectionContext, DetectionEngine};
+use agentforge_sources::adapters::{ProcessGitFetcher, ReqwestHttpFetcher};
+use agentforge_sources::{ContentKind, LockFile, ResolveRequest, ResolvedSource, SourceService};
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -429,6 +431,9 @@ fn config(root: &Path, command: ConfigCommand) -> Result<Outcome, CliFailure> {
 }
 
 fn resources(root: &Path, kind: &str, command: ResourceCommand) -> Result<Outcome, CliFailure> {
+    if let ResourceCommand::Update { id, dry_run } = &command {
+        return update_resources(root, kind, id.as_deref(), *dry_run);
+    }
     let compilation = compile(root)?;
     match command {
         ResourceCommand::List { json } => {
@@ -470,15 +475,152 @@ fn resources(root: &Path, kind: &str, command: ResourceCommand) -> Result<Outcom
         ResourceCommand::Remove { id, dry_run } => {
             mutate_spec(root, &compilation.spec, kind, "remove", &id, dry_run)
         }
-        ResourceCommand::Update { id, dry_run } => mutate_spec(
-            root,
-            &compilation.spec,
-            kind,
-            "update",
-            id.as_deref().unwrap_or("all"),
-            dry_run,
-        ),
+        ResourceCommand::Update { .. } => unreachable!(),
     }
+}
+
+fn update_resources(
+    root: &Path,
+    kind: &str,
+    selected: Option<&str>,
+    dry_run: bool,
+) -> Result<Outcome, CliFailure> {
+    if !matches!(kind, "skill" | "mcp") {
+        return Err(CliFailure {
+            message: "only skill and mcp support remote update".into(),
+            exit: 2,
+        });
+    }
+    let spec_text =
+        std::fs::read_to_string(root.join(".agentforge/project.yaml")).map_err(runtime)?;
+    let spec = SpecValidator::new()
+        .validate_yaml(&spec_text)
+        .spec
+        .ok_or_else(|| CliFailure {
+            message: "ProjectSpec is invalid".into(),
+            exit: 1,
+        })?;
+    let lock_path = root.join(".agentforge/lock.yaml");
+    let existing = std::fs::read(&lock_path)
+        .ok()
+        .and_then(|bytes| serde_yaml::from_slice::<LockFile>(&bytes).ok())
+        .unwrap_or_else(|| {
+            LockFile::new(format!("agentforge {}", env!("CARGO_PKG_VERSION")), vec![])
+                .expect("empty lock")
+        });
+    let runtime = tokio::runtime::Runtime::new().map_err(internal)?;
+    let updated = runtime
+        .block_on(async {
+            let http = ReqwestHttpFetcher::new().map_err(|error| error.to_string())?;
+            let service = SourceService::new(http, ProcessGitFetcher::default());
+            let mut entries = existing.sources.clone();
+            let mut changed = Vec::new();
+            if kind == "skill" {
+                for item in spec
+                    .skills
+                    .iter()
+                    .filter(|item| selected.is_none_or(|id| id == item.id))
+                {
+                    if matches!(item.source, agentforge_core::model::Source::Local { .. }) {
+                        continue;
+                    }
+                    if let ResolvedSource::Remote { lock, vendor } = service
+                        .resolve(ResolveRequest {
+                            kind: ContentKind::Skill,
+                            id: &item.id,
+                            source: &item.source,
+                            allow_unpinned: false,
+                            allow_executable_content: false,
+                            installed_vendor_bytes: 0,
+                        })
+                        .await
+                        .map_err(|error| error.to_string())?
+                    {
+                        if !dry_run {
+                            write_vendor(root, &lock.vendor_path, &vendor)?;
+                        }
+                        entries.retain(|entry| {
+                            !(entry.kind == ContentKind::Skill && entry.id == item.id)
+                        });
+                        entries.push(*lock);
+                        changed.push(item.id.clone());
+                    }
+                }
+            } else {
+                for item in spec
+                    .mcp
+                    .iter()
+                    .filter_map(|item| item.source.as_ref().map(|source| (item, source)))
+                    .filter(|(item, _)| selected.is_none_or(|id| id == item.id))
+                {
+                    if matches!(item.1, agentforge_core::model::Source::Local { .. }) {
+                        continue;
+                    }
+                    if let ResolvedSource::Remote { lock, vendor } = service
+                        .resolve(ResolveRequest {
+                            kind: ContentKind::Mcp,
+                            id: &item.0.id,
+                            source: item.1,
+                            allow_unpinned: false,
+                            allow_executable_content: false,
+                            installed_vendor_bytes: 0,
+                        })
+                        .await
+                        .map_err(|error| error.to_string())?
+                    {
+                        if !dry_run {
+                            write_vendor(root, &lock.vendor_path, &vendor)?;
+                        }
+                        entries.retain(|entry| {
+                            !(entry.kind == ContentKind::Mcp && entry.id == item.0.id)
+                        });
+                        entries.push(*lock);
+                        changed.push(item.0.id.clone());
+                    }
+                }
+            }
+            if !dry_run {
+                let lock =
+                    LockFile::new(format!("agentforge {}", env!("CARGO_PKG_VERSION")), entries)
+                        .map_err(|error| error.to_string())?;
+                std::fs::write(
+                    lock_path,
+                    lock.to_yaml().map_err(|error| error.to_string())?,
+                )
+                .map_err(|error| error.to_string())?;
+            }
+            Ok::<_, String>(changed)
+        })
+        .map_err(|message| CliFailure { message, exit: 3 })?;
+    Ok(outcome_value(
+        &format!("{kind} update"),
+        json!({"updated":updated,"dryRun":dry_run}),
+        vec![],
+        if dry_run {
+            "Would refresh remote sources".into()
+        } else {
+            "Remote sources refreshed".into()
+        },
+        false,
+        false,
+    ))
+}
+
+fn write_vendor(
+    root: &Path,
+    vendor_path: &str,
+    vendor: &agentforge_sources::VendorTree,
+) -> Result<(), String> {
+    let directory = root.join(vendor_path.replace('/', std::path::MAIN_SEPARATOR_STR));
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    for file in &vendor.files {
+        let path = directory.join(file.path.replace('/', std::path::MAIN_SEPARATOR_STR));
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        std::fs::write(path, &file.content).map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn mutate_spec(

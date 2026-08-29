@@ -21,6 +21,7 @@ dependencies = [
  "agentforge-compiler",
  "agentforge-core",
  "agentforge-detectors",
+ "agentforge-sources",
  "assert_cmd",
  "clap",
  "predicates",
@@ -29,6 +30,7 @@ dependencies = [
  "serde_yaml",
  "similar",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]

@@ -14,14 +14,15 @@ agentforge-application = { path = "../application" }
 agentforge-compiler = { path = "../compiler" }
 agentforge-core = { path = "../core" }
 agentforge-detectors = { path = "../detectors" }
+agentforge-sources = { path = "../sources" }
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 similar.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 assert_cmd = "2.0.17"
 predicates = "3.1.3"
 tempfile = "3.20.0"
-
