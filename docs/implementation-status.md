@@ -11,14 +11,14 @@
 - Resolver、capability 决策、DesiredPlan、manifest、漂移/冲突检测、stale preview 和事务回滚/journal 恢复。
 - Generic、Codex、Claude Code、Copilot CLI/cloud-manual renderer 及 golden snapshots。
 - CLI/TUI：init、detect、sync、diff、doctor、config、skill、mcp、subagent、target；JSON 包络、非交互授权和 strict 模式。
-- 跨平台 CI/release workflow 配置（Windows x64、Linux x64/arm64、macOS x64/arm64）。
+- 跨平台 CI/release workflow 配置（Windows x64、Linux x64/arm64、macOS arm64）；macOS x64 暂不使用 GitHub Hosted Runner。
 
 ## 部分完成或待完善
 
 - **官方能力矩阵**：renderer descriptor 已绑定版本和 `verifiedAt`，但仍需在每次上游格式变化时复核官方文档并更新矩阵与 golden。
 - **Doctor 环境检查**：当前会检查环境变量名称、Agent 可执行文件和 Codex trust 提示；尚未为每个 Agent 提供版本范围解析或自动修复建议。
 - **TUI 验证**：已有 intent、取消、分页和常见尺寸快照；仍应补充真实终端 resize、diff 长文本和 Windows 控制台实测。
-- **发布产物**：workflow 会构建和校验哈希，但尚未在本地验证五个平台的最终归档，也没有安装脚本或包管理器发布。
+- **发布产物**：workflow 会构建和校验四个平台的最终归档；macOS x64 因 Hosted Runner 资源限制暂未纳入自动门禁，也没有安装脚本或包管理器发布。
 - **依赖治理**：workspace 已固定 `Cargo.lock` 并声明 Apache-2.0；尚未引入 `cargo-deny`/SBOM 生成，第三方许可证审计仍需发布前人工完成。
 
 ## 明确待实现（不应伪装成 v0.1 已交付）

@@ -9,7 +9,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 git diff --check
 ```
 
-测试应覆盖 schema、detector fixtures、source lock/vendor/offline、四类 renderer golden、重复 sync、漂移/冲突、安全拒绝和事务回滚。跨平台 CI 目标为 Windows x64、macOS x64/arm64、Linux x64/arm64。
+测试应覆盖 schema、detector fixtures、source lock/vendor/offline、四类 renderer golden、重复 sync、漂移/冲突、安全拒绝和事务回滚。当前 GitHub Hosted Runner 覆盖 Windows x64、macOS arm64、Linux x64/arm64；macOS x64 暂不纳入自动门禁，需使用自托管 runner 或本地交叉编译补验。
 
 ## 发布
 
