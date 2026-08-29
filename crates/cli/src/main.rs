@@ -1073,7 +1073,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         root: &root,
         filesystem: &RealFileSystem,
     });
-    let context_path = PathBuf::from(".agentforge/generated/project-context.md");
+    let context_path = PathBuf::from(".agentforge/project-context.md");
     let context_content = project_context(&report.profile);
     let skills = args
         .skills
@@ -1301,7 +1301,7 @@ fn cli_source(value: &str) -> agentforge_core::model::Source {
 fn rollback_init_files(root: &Path, previous_lock: Option<&[u8]>, previous_vendor: bool) {
     let project = root.join(".agentforge/project.yaml");
     let lock = root.join(".agentforge/lock.yaml");
-    let context = root.join(".agentforge/generated/project-context.md");
+    let context = root.join(".agentforge/project-context.md");
     let _ = std::fs::remove_file(project);
     let _ = std::fs::remove_file(context);
     match previous_lock {
