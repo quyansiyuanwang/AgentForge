@@ -297,6 +297,76 @@ fn init_three_vendor_targets_is_idempotent() {
 }
 
 #[test]
+fn nextjs_project_full_offline_rebuild_e2e() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        root.path(),
+        "package.json",
+        r#"{"name":"next-fixture","scripts":{"build":"next build","test":"vitest"},"dependencies":{"next":"15.0.0","react":"19.0.0","react-dom":"19.0.0"},"devDependencies":{"vitest":"2.0.0"}}"#,
+    );
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args([
+            "init",
+            "--non-interactive",
+            "--target",
+            "codex",
+            "--target",
+            "claude",
+            "--target",
+            "copilot",
+        ])
+        .assert()
+        .success();
+    assert!(root.path().join(".agentforge/project.yaml").exists());
+    assert!(root.path().join(".agentforge/lock.yaml").exists());
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.path().join(".agentforge/manifest.json")).unwrap())
+            .unwrap();
+    let artifacts = manifest["artifacts"].as_array().unwrap().to_owned();
+    assert!(artifacts.iter().any(|item| item["path"] == "AGENTS.md"));
+    let doctor = cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["doctor", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        doctor.status.success(),
+        "{}",
+        String::from_utf8_lossy(&doctor.stderr)
+    );
+    assert!(String::from_utf8_lossy(&doctor.stdout).contains("Healthy"));
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .arg("sync")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No changes"));
+    for artifact in &artifacts {
+        fs::remove_file(root.path().join(artifact["path"].as_str().unwrap())).unwrap();
+    }
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .env("AGENTFORGE_OFFLINE", "1")
+        .arg("sync")
+        .assert()
+        .success();
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .arg("diff")
+        .assert()
+        .success()
+        .stdout("Clean\n");
+    fs::write(root.path().join("AGENTS.md"), b"user edit").unwrap();
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .arg("sync")
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("Conflict AGENTS.md"));
+}
+
+#[test]
 fn doctor_reports_missing_lockfile_as_warning() {
     let root = tempfile::tempdir().unwrap();
     write(root.path(), "ai/project.md", "instructions\n");
