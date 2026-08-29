@@ -142,3 +142,19 @@ fn strict_mode_blocks_visible_capability_downgrades() {
             .any(|diagnostic| diagnostic.target.as_deref() == Some("copilot"))
     );
 }
+
+#[test]
+fn repeated_offline_compilation_is_byte_stable() {
+    let repository = tempfile::tempdir().unwrap();
+    setup(repository.path());
+    let first = ProjectCompiler::new(repository.path()).compile().unwrap();
+    let expected = desired_bytes(&first);
+    ApplicationService::new(repository.path())
+        .apply(&first.plan)
+        .unwrap();
+    for _ in 0..100 {
+        let compilation = ProjectCompiler::new(repository.path()).compile().unwrap();
+        assert!(!compilation.plan.has_changes());
+        assert_eq!(desired_bytes(&compilation), expected);
+    }
+}
