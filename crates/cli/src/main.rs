@@ -506,7 +506,16 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
 fn config(root: &Path, command: ConfigCommand) -> Result<Outcome, CliFailure> {
     match command {
         ConfigCommand::Validate { path, json } => {
-            let path = path.unwrap_or_else(|| root.join(".agentforge/project.yaml"));
+            let path = path.map_or_else(
+                || root.join(".agentforge/project.yaml"),
+                |path| {
+                    if path.is_absolute() {
+                        path
+                    } else {
+                        root.join(path)
+                    }
+                },
+            );
             let text = std::fs::read_to_string(&path).map_err(runtime)?;
             let validation = SpecValidator::new().validate_yaml(&text);
             let failed = !validation.is_valid();

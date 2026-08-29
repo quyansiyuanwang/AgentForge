@@ -138,6 +138,25 @@ fn config_show_reads_spec_without_lock_or_generated_state() {
 }
 
 #[test]
+fn config_validate_resolves_relative_paths_from_repository_root() {
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir(root.path().join(".git")).unwrap();
+    write(
+        root.path(),
+        "configs/project.yaml",
+        "schemaVersion: '1'\nproject: { name: nested }\ntargets: [generic]\n",
+    );
+    let nested = root.path().join("subdir");
+    fs::create_dir_all(&nested).unwrap();
+    cargo_bin_cmd!("agentforge")
+        .current_dir(&nested)
+        .args(["config", "validate", "configs/project.yaml"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Valid"));
+}
+
+#[test]
 fn sync_is_idempotent_diff_detects_drift_and_strict_blocks_warnings() {
     let root = tempfile::tempdir().unwrap();
     setup(root.path());
