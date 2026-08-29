@@ -268,6 +268,26 @@ fn doctor_reports_missing_lockfile_as_warning() {
 }
 
 #[test]
+fn cli_sync_rebuilds_targets_from_tracked_state() {
+    let root = tempfile::tempdir().unwrap();
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["init", "--non-interactive", "--target", "generic"])
+        .assert()
+        .success();
+    let generated = root.path().join("AGENTS.md");
+    let original = fs::read(&generated).unwrap();
+    fs::remove_file(&generated).unwrap();
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .env("AGENTFORGE_OFFLINE", "1")
+        .arg("sync")
+        .assert()
+        .success();
+    assert_eq!(fs::read(generated).unwrap(), original);
+}
+
+#[test]
 fn sync_json_returns_envelope() {
     let root = tempfile::tempdir().unwrap();
     setup(root.path());
