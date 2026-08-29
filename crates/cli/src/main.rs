@@ -740,15 +740,34 @@ fn update_resources(
             exit: 1,
         })?;
     let lock_path = root.join(".agentforge/lock.yaml");
-    let existing = std::fs::read(&lock_path)
-        .ok()
-        .and_then(|bytes| serde_yaml::from_slice::<LockFile>(&bytes).ok())
+    let previous_lock = std::fs::read(&lock_path).ok();
+    let existing = previous_lock
+        .as_deref()
+        .and_then(|bytes| serde_yaml::from_slice::<LockFile>(bytes).ok())
         .unwrap_or_else(|| {
             LockFile::new(format!("agentforge {}", env!("CARGO_PKG_VERSION")), vec![])
                 .expect("empty lock")
         });
-    let runtime = tokio::runtime::Runtime::new().map_err(internal)?;
-    let updated = runtime
+    let vendor_root = root.join(".agentforge/vendor");
+    let vendor_backup = root.join(format!(
+        ".agentforge/.update-vendor-backup-{}",
+        std::process::id()
+    ));
+    let previous_vendor = vendor_root.exists();
+    if apply_targets && !dry_run && previous_vendor {
+        if vendor_backup.exists() {
+            return Err(CliFailure {
+                message: format!(
+                    "stale update vendor backup exists: {}",
+                    vendor_backup.display()
+                ),
+                exit: 3,
+            });
+        }
+        std::fs::rename(&vendor_root, &vendor_backup).map_err(runtime)?;
+    }
+    let tokio_runtime = tokio::runtime::Runtime::new().map_err(internal)?;
+    let updated_result = tokio_runtime
         .block_on(async {
             let http = ReqwestHttpFetcher::new().map_err(|error| error.to_string())?;
             let service = SourceService::new(http, ProcessGitFetcher::default());
@@ -877,14 +896,30 @@ fn update_resources(
             }
             Ok::<_, String>(changed)
         })
-        .map_err(|message| CliFailure { message, exit: 3 })?;
+        .map_err(|message| CliFailure { message, exit: 3 });
+    let updated = match updated_result {
+        Ok(updated) => updated,
+        Err(error) => {
+            if apply_targets && !dry_run {
+                restore_update_state(root, &lock_path, previous_lock.as_deref(), &vendor_backup);
+            }
+            return Err(error);
+        }
+    };
     let mut generated_preview = String::new();
     let mut generated_changes = Value::Array(Vec::new());
     if apply_targets && !dry_run {
-        let compilation = compile(root)?;
+        let compilation = match compile(root) {
+            Ok(compilation) => compilation,
+            Err(error) => {
+                restore_update_state(root, &lock_path, previous_lock.as_deref(), &vendor_backup);
+                return Err(error);
+            }
+        };
         generated_changes = changes_json(&compilation);
         if compilation.blocks_apply(false) {
             let preview = human_diff(&compilation);
+            restore_update_state(root, &lock_path, previous_lock.as_deref(), &vendor_backup);
             return Ok(outcome_value(
                 &format!("{kind} update"),
                 json!({"updated":updated,"dryRun":false,"changes":changes_json(&compilation)}),
@@ -897,11 +932,22 @@ fn update_resources(
         if compilation.plan.has_changes() {
             ApplicationService::new(root)
                 .apply(&compilation.plan)
-                .map_err(|error| CliFailure {
-                    message: error.to_string(),
-                    exit: 3,
+                .map_err(|error| {
+                    restore_update_state(
+                        root,
+                        &lock_path,
+                        previous_lock.as_deref(),
+                        &vendor_backup,
+                    );
+                    CliFailure {
+                        message: error.to_string(),
+                        exit: 3,
+                    }
                 })?;
             generated_preview = human_diff(&compilation);
+        }
+        if vendor_backup.exists() {
+            std::fs::remove_dir_all(&vendor_backup).map_err(runtime)?;
         }
     }
     let human = if generated_preview.is_empty() {
@@ -1221,6 +1267,32 @@ fn restore_spec(root: &Path, bytes: &[u8]) -> Result<(), CliFailure> {
     ApplicationService::new(root)
         .apply_control_files(&[(PathBuf::from(".agentforge/project.yaml"), bytes.to_vec())])
         .map_err(runtime)
+}
+
+fn restore_update_state(
+    root: &Path,
+    lock_path: &Path,
+    previous_lock: Option<&[u8]>,
+    vendor_backup: &Path,
+) {
+    match previous_lock {
+        Some(bytes) => {
+            let _ = std::fs::write(lock_path, bytes);
+        }
+        None => {
+            let _ = std::fs::remove_file(lock_path);
+        }
+    }
+    if vendor_backup.exists() {
+        let vendor = root.join(".agentforge/vendor");
+        if std::fs::symlink_metadata(&vendor)
+            .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            let _ = std::fs::remove_dir_all(&vendor);
+        }
+        let _ = std::fs::rename(vendor_backup, vendor);
+    }
 }
 
 fn resource_count(spec: &agentforge_core::model::ProjectSpec, kind: &str) -> usize {
