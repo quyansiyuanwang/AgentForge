@@ -177,6 +177,52 @@ impl<V: ApplyValidator, F: FaultInjector> ApplicationService<V, F> {
         }
     }
 
+    /// Atomically writes non-generated control files such as ProjectSpec and lock metadata.
+    pub fn apply_control_files(&self, files: &[(PathBuf, Vec<u8>)]) -> Result<(), ApplyError> {
+        let transaction = tempfile::Builder::new()
+            .prefix(".control-")
+            .tempdir_in(&self.root)
+            .map_err(|source| io_error(&self.root, source))?;
+        let mut backups = Vec::new();
+        let mut installed = Vec::new();
+        let result = (|| {
+            for (relative, bytes) in files {
+                let relative_text = relative.to_string_lossy().replace('\\', "/");
+                validate_repository_path(&self.root, &relative_text)?;
+                let target = self.root.join(relative);
+                let staged = transaction.path().join(&relative_text);
+                if let Some(parent) = staged.parent() {
+                    fs::create_dir_all(parent).map_err(|source| io_error(parent, source))?;
+                }
+                fs::write(&staged, bytes).map_err(|source| io_error(&staged, source))?;
+                if target.exists() {
+                    let backup = transaction.path().join(format!("backup-{}", backups.len()));
+                    fs::rename(&target, &backup).map_err(|source| io_error(&target, source))?;
+                    backups.push((target.clone(), backup));
+                }
+                if let Some(parent) = target.parent() {
+                    fs::create_dir_all(parent).map_err(|source| io_error(parent, source))?;
+                }
+                fs::rename(&staged, &target).map_err(|source| io_error(&target, source))?;
+                installed.push(target);
+            }
+            Ok::<(), ApplyError>(())
+        })();
+        if let Err(error) = result {
+            for target in installed {
+                let _ = fs::remove_file(target);
+            }
+            for (target, backup) in backups.iter().rev() {
+                let _ = fs::rename(backup, target);
+            }
+            return Err(error);
+        }
+        for (_, backup) in backups {
+            let _ = fs::remove_file(backup);
+        }
+        Ok(())
+    }
+
     pub fn apply(&self, plan: &ResolvedPlan) -> Result<(), ApplyError> {
         if self.recover_if_needed()? {
             return Err(ApplyError::RecoveredPreviousTransaction);
