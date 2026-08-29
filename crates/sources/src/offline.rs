@@ -91,7 +91,7 @@ fn read_tree(root: &Path) -> Result<Vec<UntrustedEntry>, SourceError> {
             } else if metadata.is_dir() {
                 pending.push(path);
             } else if metadata.is_file() {
-                if has_multiple_links(&metadata) {
+                if has_multiple_links(&path, &metadata).map_err(|error| offline_io(&path, error))? {
                     entries.push(UntrustedEntry {
                         path: relative,
                         kind: EntryKind::HardLink,
@@ -121,13 +121,55 @@ fn read_tree(root: &Path) -> Result<Vec<UntrustedEntry>, SourceError> {
 }
 
 #[cfg(unix)]
-fn has_multiple_links(metadata: &fs::Metadata) -> bool {
+fn has_multiple_links(_path: &Path, metadata: &fs::Metadata) -> io::Result<bool> {
     use std::os::unix::fs::MetadataExt;
-    metadata.nlink() > 1
+    Ok(metadata.nlink() > 1)
 }
-#[cfg(not(unix))]
-fn has_multiple_links(_metadata: &fs::Metadata) -> bool {
-    false
+#[cfg(windows)]
+fn has_multiple_links(path: &Path, _metadata: &fs::Metadata) -> io::Result<bool> {
+    use std::{os::windows::ffi::OsStrExt, ptr};
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
+        Storage::FileSystem::{
+            BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_FLAG_BACKUP_SEMANTICS,
+            FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+            GetFileInformationByHandle, OPEN_EXISTING,
+        },
+    };
+    let wide = path
+        .as_os_str()
+        .encode_wide()
+        .chain([0])
+        .collect::<Vec<_>>();
+    let handle = unsafe {
+        CreateFileW(
+            wide.as_ptr(),
+            FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            ptr::null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let mut information = unsafe { std::mem::zeroed::<BY_HANDLE_FILE_INFORMATION>() };
+    let result = unsafe { GetFileInformationByHandle(handle, &mut information) };
+    let query_error = (result == 0).then(io::Error::last_os_error);
+    let close_result = unsafe { CloseHandle(handle) };
+    if let Some(error) = query_error {
+        return Err(error);
+    }
+    if close_result == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(information.nNumberOfLinks > 1)
+}
+#[cfg(not(any(unix, windows)))]
+fn has_multiple_links(_path: &Path, _metadata: &fs::Metadata) -> io::Result<bool> {
+    Ok(false)
 }
 #[cfg(unix)]
 fn executable_mode(metadata: &fs::Metadata) -> u32 {

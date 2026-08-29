@@ -23,6 +23,7 @@ pub trait HttpFetcher: Send + Sync {
 pub struct ReqwestHttpFetcher {
     client: reqwest::Client,
     max_redirects: usize,
+    allow_http_for_tests: bool,
 }
 
 impl ReqwestHttpFetcher {
@@ -36,6 +37,7 @@ impl ReqwestHttpFetcher {
         Ok(Self {
             client,
             max_redirects: 5,
+            allow_http_for_tests: false,
         })
     }
 }
@@ -43,7 +45,7 @@ impl ReqwestHttpFetcher {
 #[async_trait]
 impl HttpFetcher for ReqwestHttpFetcher {
     async fn get(&self, value: &str, max_bytes: u64) -> Result<HttpResponse, SourceError> {
-        let mut current = secure_url(value)?;
+        let mut current = secure_url(value, self.allow_http_for_tests)?;
         for redirects in 0..=self.max_redirects {
             let response = self
                 .client
@@ -67,6 +69,7 @@ impl HttpFetcher for ReqwestHttpFetcher {
                         .join(&location)
                         .map_err(SourceError::InvalidUrl)?
                         .as_str(),
+                    self.allow_http_for_tests,
                 )?;
                 continue;
             }
@@ -122,9 +125,9 @@ fn header_value(response: &reqwest::Response, name: header::HeaderName) -> Optio
         .map(str::to_owned)
 }
 
-fn secure_url(value: &str) -> Result<Url, SourceError> {
+fn secure_url(value: &str, allow_http_for_tests: bool) -> Result<Url, SourceError> {
     let url = Url::parse(value).map_err(SourceError::InvalidUrl)?;
-    if url.scheme() != "https" {
+    if url.scheme() != "https" && !(allow_http_for_tests && url.scheme() == "http") {
         return Err(SourceError::InsecureUrl(value.into()));
     }
     if !url.username().is_empty() || url.password().is_some() {
@@ -152,7 +155,10 @@ pub trait GitFetcher: Send + Sync {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct ProcessGitFetcher;
+pub struct ProcessGitFetcher {
+    #[cfg(test)]
+    allow_file_for_tests: bool,
+}
 
 #[async_trait]
 impl GitFetcher for ProcessGitFetcher {
@@ -163,7 +169,18 @@ impl GitFetcher for ProcessGitFetcher {
         subpath: Option<&str>,
         limits: VendorLimits,
     ) -> Result<GitResolution, SourceError> {
-        let repository_url = secure_url(repository)?;
+        #[cfg(test)]
+        let repository_url = if self.allow_file_for_tests {
+            let url = Url::parse(repository).map_err(SourceError::InvalidUrl)?;
+            if !matches!(url.scheme(), "file" | "https") {
+                return Err(SourceError::InsecureUrl(repository.into()));
+            }
+            url
+        } else {
+            secure_url(repository, false)?
+        };
+        #[cfg(not(test))]
+        let repository_url = secure_url(repository, false)?;
         let temporary = tempfile::tempdir().map_err(|error| SourceError::Git(error.to_string()))?;
         git(temporary.path(), ["init", "--bare", "."]).await?;
         git(
@@ -304,4 +321,158 @@ fn relative_git_path<'a>(path: &'a str, subpath: Option<&str>) -> Result<&'a str
     path.strip_prefix(subpath)
         .and_then(|rest| rest.strip_prefix('/'))
         .ok_or_else(|| SourceError::Git("Git returned a path outside subpath".into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, process::Command};
+
+    use super::*;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    async fn server() -> (String, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                tokio::spawn(async move {
+                    let mut request = [0u8; 2048];
+                    let count = stream.read(&mut request).await.unwrap();
+                    let line = String::from_utf8_lossy(&request[..count]);
+                    let path = line.split_whitespace().nth(1).unwrap_or("/");
+                    let response = match path {
+                        "/start" => {
+                            "HTTP/1.1 302 Found\r\nLocation: /ok\r\nContent-Length: 0\r\n\r\n"
+                        }
+                        "/loop" => {
+                            "HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\n\r\n"
+                        }
+                        "/rate" => "HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\n\r\n",
+                        "/large" => "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n0123456789",
+                        "/slow" => {
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+                        }
+                        _ => "HTTP/1.1 200 OK\r\nETag: fixture\r\nContent-Length: 2\r\n\r\nok",
+                    };
+                    let _ = stream.write_all(response.as_bytes()).await;
+                });
+            }
+        });
+        (format!("http://{address}"), task)
+    }
+
+    fn fetcher(timeout: Duration, max_redirects: usize) -> ReqwestHttpFetcher {
+        ReqwestHttpFetcher {
+            client: reqwest::Client::builder()
+                .redirect(Policy::none())
+                .timeout(timeout)
+                .build()
+                .unwrap(),
+            max_redirects,
+            allow_http_for_tests: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn follows_redirect_and_locks_final_url() {
+        let (base, task) = server().await;
+        let result = fetcher(Duration::from_secs(1), 5)
+            .get(&format!("{base}/start"), 10)
+            .await
+            .unwrap();
+        assert_eq!(result.final_url, format!("{base}/ok"));
+        assert_eq!(result.etag.as_deref(), Some("fixture"));
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn classifies_redirect_rate_size_and_timeout_failures() {
+        let (base, task) = server().await;
+        let normal = fetcher(Duration::from_secs(1), 1);
+        assert!(matches!(
+            normal.get(&format!("{base}/loop"), 10).await,
+            Err(SourceError::TooManyRedirects(1))
+        ));
+        assert!(matches!(
+            normal.get(&format!("{base}/rate"), 10).await,
+            Err(SourceError::RateLimited)
+        ));
+        assert!(matches!(
+            normal.get(&format!("{base}/large"), 5).await,
+            Err(SourceError::DownloadTooLarge { .. })
+        ));
+        assert!(matches!(
+            fetcher(Duration::from_millis(10), 1)
+                .get(&format!("{base}/slow"), 10)
+                .await,
+            Err(SourceError::Http(_))
+        ));
+        task.abort();
+    }
+
+    #[test]
+    fn production_url_policy_rejects_http_and_credentials() {
+        assert!(matches!(
+            secure_url("http://example.com", false),
+            Err(SourceError::InsecureUrl(_))
+        ));
+        assert!(matches!(
+            secure_url("https://user:secret@example.com", false),
+            Err(SourceError::UrlCredentials)
+        ));
+    }
+
+    fn run_git(directory: &Path, arguments: &[&str]) {
+        let status = Command::new("git")
+            .args(arguments)
+            .current_dir(directory)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {arguments:?}");
+    }
+
+    #[tokio::test]
+    async fn process_git_fetcher_pins_commit_and_reads_blobs_without_checkout() {
+        let repository = tempfile::tempdir().unwrap();
+        run_git(repository.path(), &["init"]);
+        run_git(
+            repository.path(),
+            &["config", "user.name", "AgentForge Test"],
+        );
+        run_git(
+            repository.path(),
+            &["config", "user.email", "test@agentforge.invalid"],
+        );
+        fs::create_dir_all(repository.path().join("skills/testing")).unwrap();
+        fs::write(
+            repository.path().join("skills/testing/SKILL.md"),
+            b"fixture skill",
+        )
+        .unwrap();
+        run_git(repository.path(), &["add", "."]);
+        run_git(repository.path(), &["commit", "-m", "fixture"]);
+
+        let url = Url::from_file_path(repository.path()).unwrap().to_string();
+        let result = ProcessGitFetcher {
+            allow_file_for_tests: true,
+        }
+        .fetch(
+            &url,
+            "HEAD",
+            Some("skills/testing"),
+            VendorLimits::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.commit.len(), 40);
+        assert!(!result.tree_hash.is_empty());
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].path, "SKILL.md");
+        assert_eq!(result.entries[0].content, b"fixture skill");
+    }
 }

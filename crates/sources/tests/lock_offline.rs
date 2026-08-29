@@ -61,3 +61,23 @@ fn offline_verifier_accepts_exact_tree_and_rejects_drift_without_network() {
     fs::write(directory.join("content"), b"drift").unwrap();
     assert!(verify_vendor_offline(root.path(), &lock, VendorLimits::default()).is_err());
 }
+
+#[test]
+fn offline_verifier_rejects_hard_links() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join(".agentforge/vendor/skills/testing");
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("content"), b"hello").unwrap();
+    fs::hard_link(directory.join("content"), directory.join("alias")).unwrap();
+    let tree = VendorTree::validate(
+        vec![
+            UntrustedEntry::file("alias", b"hello"),
+            UntrustedEntry::file("content", b"hello"),
+        ],
+        VendorLimits::default(),
+        0,
+    )
+    .unwrap();
+    let lock = LockFile::new("agentforge 0.1.0", vec![entry("testing", &tree)]).unwrap();
+    assert!(verify_vendor_offline(root.path(), &lock, VendorLimits::default()).is_err());
+}
