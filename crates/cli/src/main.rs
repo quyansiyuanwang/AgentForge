@@ -1048,6 +1048,8 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
     let planned_artifacts = planned_artifacts(&target_values);
     let lock_path = root.join(".agentforge/lock.yaml");
     let previous_lock = std::fs::read(&lock_path).ok();
+    let vendor_root = root.join(".agentforge/vendor");
+    let previous_vendor = vendor_root.exists();
     let report = DetectionEngine::with_builtins().detect(&DetectionContext {
         root: &root,
         filesystem: &RealFileSystem,
@@ -1083,7 +1085,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 args.allow_unpinned_source,
                 args.allow_executable_content,
             ) {
-                rollback_init_files(&root, previous_lock.as_deref());
+                rollback_init_files(&root, previous_lock.as_deref(), previous_vendor);
                 return Err(error);
             }
         }
@@ -1101,7 +1103,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 args.allow_unpinned_source,
                 args.allow_executable_content,
             ) {
-                rollback_init_files(&root, previous_lock.as_deref());
+                rollback_init_files(&root, previous_lock.as_deref(), previous_vendor);
                 return Err(error);
             }
         }
@@ -1112,7 +1114,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         let compilation = match compile(&root) {
             Ok(compilation) => compilation,
             Err(error) => {
-                rollback_init_files(&root, previous_lock.as_deref());
+                rollback_init_files(&root, previous_lock.as_deref(), previous_vendor);
                 return Err(error);
             }
         };
@@ -1120,7 +1122,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
             let changes = changes_json(&compilation);
             let preview = human_diff(&compilation);
             let diagnostics = compilation.diagnostics.clone();
-            rollback_init_files(&root, previous_lock.as_deref());
+            rollback_init_files(&root, previous_lock.as_deref(), previous_vendor);
             return Ok(outcome_value(
                 "init",
                 json!({"path":path,"dryRun":false,"spec":spec,"facts":report.profile,"evidence":report.profile.evidence,"changes":changes}),
@@ -1138,7 +1140,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                     exit: 3,
                 })
             {
-                rollback_init_files(&root, previous_lock.as_deref());
+                rollback_init_files(&root, previous_lock.as_deref(), previous_vendor);
                 return Err(error);
             }
             format!("Initialized project\n{}", human_diff(&compilation))
@@ -1223,7 +1225,7 @@ fn cli_source(value: &str) -> agentforge_core::model::Source {
     }
 }
 
-fn rollback_init_files(root: &Path, previous_lock: Option<&[u8]>) {
+fn rollback_init_files(root: &Path, previous_lock: Option<&[u8]>, previous_vendor: bool) {
     let project = root.join(".agentforge/project.yaml");
     let lock = root.join(".agentforge/lock.yaml");
     let _ = std::fs::remove_file(project);
@@ -1233,6 +1235,15 @@ fn rollback_init_files(root: &Path, previous_lock: Option<&[u8]>) {
         }
         None => {
             let _ = std::fs::remove_file(lock);
+        }
+    }
+    if !previous_vendor {
+        let vendor = root.join(".agentforge/vendor");
+        if std::fs::symlink_metadata(&vendor)
+            .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            let _ = std::fs::remove_dir_all(vendor);
         }
     }
 }
