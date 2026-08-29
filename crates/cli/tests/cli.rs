@@ -589,3 +589,38 @@ fn resource_dry_run_uses_plan_and_restores_canonical_spec() {
     assert_eq!(value["data"]["dryRun"], true);
     assert!(value["data"]["changes"].is_array());
 }
+
+#[test]
+fn doctor_detects_manifest_renderer_version_drift() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path());
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .arg("sync")
+        .assert()
+        .success();
+    let manifest_path = root.path().join(".agentforge/manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["artifacts"][0]["rendererVersion"] = serde_json::json!("codex@old");
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    let output = cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["doctor", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let check = value["data"]["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["check"] == "rendererVersion")
+        .unwrap();
+    assert_eq!(check["healthy"], false);
+    assert!(!check["mismatches"].as_array().unwrap().is_empty());
+}
