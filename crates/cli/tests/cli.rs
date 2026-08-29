@@ -210,3 +210,19 @@ fn sync_json_returns_envelope() {
     assert_eq!(value["command"], "sync");
     assert_eq!(value["schemaVersion"], "1");
 }
+
+#[test]
+fn resource_remove_edits_canonical_spec_without_vendor_access() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path());
+    fs::write(root.path().join(".agentforge/lock.yaml"), b"not valid lock").unwrap();
+    let output = cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["skill", "remove", "testing", "--dry-run", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "skill remove");
+    assert!(value["data"]["dryRun"].as_bool().unwrap());
+}
