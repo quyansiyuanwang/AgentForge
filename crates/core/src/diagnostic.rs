@@ -46,6 +46,12 @@ pub enum DiagnosticCode {
     ArtifactDrift,
     #[serde(rename = "AF1303")]
     DuplicateArtifactOwner,
+    #[serde(rename = "AF1401")]
+    MissingEnvironmentVariable,
+    #[serde(rename = "AF1402")]
+    ProjectTrustRequired,
+    #[serde(rename = "AF1403")]
+    AgentUnavailable,
     #[serde(rename = "AF2001")]
     DetectorFailure,
     #[serde(rename = "AF2002")]
@@ -74,6 +80,9 @@ impl DiagnosticCode {
             Self::ArtifactConflict => "AF1301",
             Self::ArtifactDrift => "AF1302",
             Self::DuplicateArtifactOwner => "AF1303",
+            Self::MissingEnvironmentVariable => "AF1401",
+            Self::ProjectTrustRequired => "AF1402",
+            Self::AgentUnavailable => "AF1403",
             Self::DetectorFailure => "AF2001",
             Self::MalformedDetectionInput => "AF2002",
             Self::IoFailure => "AF3001",

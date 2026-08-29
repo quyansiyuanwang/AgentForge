@@ -57,6 +57,50 @@ impl ApplyValidator for NoopValidator {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ArtifactValidator;
+
+impl ApplyValidator for ArtifactValidator {
+    fn validate_staging(&self, staging_root: &Path, plan: &ResolvedPlan) -> Result<(), String> {
+        for change in &plan.changes {
+            if let Some(desired) = &change.desired {
+                let path = staging_root.join(native(&desired.path));
+                let actual =
+                    fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+                if actual != desired.content {
+                    return Err(format!("staged bytes differ for {}", desired.path));
+                }
+            }
+        }
+        let path = staging_root.join(MANIFEST_PATH.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let manifest: Manifest =
+            serde_json::from_slice(&fs::read(&path).map_err(|error| error.to_string())?)
+                .map_err(|error| error.to_string())?;
+        if manifest != plan.next_manifest {
+            return Err("staged manifest differs from plan".into());
+        }
+        Ok(())
+    }
+
+    fn validate_applied(&self, repository_root: &Path, manifest: &Manifest) -> Result<(), String> {
+        for artifact in &manifest.artifacts {
+            let path = repository_root.join(native(&artifact.path));
+            let bytes = fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+            if content_hash(&bytes) != artifact.sha256 {
+                return Err(format!("applied hash differs for {}", artifact.path));
+            }
+        }
+        let path = repository_root.join(MANIFEST_PATH.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let actual: Manifest =
+            serde_json::from_slice(&fs::read(&path).map_err(|error| error.to_string())?)
+                .map_err(|error| error.to_string())?;
+        if &actual != manifest {
+            return Err("applied manifest differs from plan".into());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ApplyError {
     #[error("plan contains conflicts")]
@@ -108,17 +152,17 @@ struct Mutation {
     had_original: bool,
 }
 
-pub struct ApplicationService<V = NoopValidator, F = NoFaults> {
+pub struct ApplicationService<V = ArtifactValidator, F = NoFaults> {
     root: PathBuf,
     validator: V,
     faults: F,
 }
 
-impl ApplicationService<NoopValidator, NoFaults> {
+impl ApplicationService<ArtifactValidator, NoFaults> {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {
             root: root.into(),
-            validator: NoopValidator,
+            validator: ArtifactValidator,
             faults: NoFaults,
         }
     }

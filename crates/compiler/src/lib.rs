@@ -36,7 +36,9 @@ pub struct Compilation {
 
 impl Compilation {
     pub fn blocks_apply(&self, strict: bool) -> bool {
-        self.plan.has_conflicts() || self.capabilities.blocks_apply(strict)
+        self.plan.has_conflicts()
+            || self.capabilities.blocks_apply(strict)
+            || (strict && !self.manual_actions.is_empty())
     }
 }
 

@@ -73,6 +73,7 @@ pub struct ArtifactChange {
     pub kind: ChangeKind,
     pub before_sha256: Option<String>,
     pub after_sha256: Option<String>,
+    pub before_content: Option<Vec<u8>>,
     pub desired: Option<DesiredArtifact>,
     pub reason: Option<String>,
 }
@@ -145,6 +146,7 @@ pub fn build_plan(
         let desired = desired_by_path.remove(&path);
         let owner = previous_by_path.get(&path).copied();
         let current_hash = current.get(&path).map(|bytes| content_hash(bytes));
+        let before_content = current.get(&path).cloned();
         let desired_hash = desired
             .as_ref()
             .map(|artifact| content_hash(&artifact.content));
@@ -176,6 +178,7 @@ pub fn build_plan(
             kind,
             before_sha256: current_hash,
             after_sha256: desired_hash,
+            before_content,
             desired,
             reason,
         });

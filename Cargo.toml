@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/application", "crates/compiler", "crates/core", "crates/detectors", "crates/sources", "crates/targets"]
+members = ["crates/application", "crates/cli", "crates/compiler", "crates/core", "crates/detectors", "crates/sources", "crates/targets"]
 resolver = "2"
 
 [workspace.package]
@@ -11,12 +11,14 @@ license = "Apache-2.0"
 [workspace.dependencies]
 jsonschema = { version = "0.33.0", default-features = false }
 async-trait = "0.1.89"
+clap = { version = "4.5.46", features = ["derive"] }
 futures-util = "0.3.31"
 hex = "0.4.3"
 reqwest = { version = "0.12.23", default-features = false, features = ["rustls-tls", "stream"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 serde_yaml = "0.9.34"
+similar = "2.7.0"
 thiserror = "2.0.12"
 sha2 = "0.10.9"
 tokio = { version = "1.47.1", features = ["process", "time"] }

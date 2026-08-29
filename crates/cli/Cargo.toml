@@ -1,0 +1,27 @@
+[package]
+name = "agentforge-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "agentforge"
+path = "src/main.rs"
+
+[dependencies]
+agentforge-application = { path = "../application" }
+agentforge-compiler = { path = "../compiler" }
+agentforge-core = { path = "../core" }
+agentforge-detectors = { path = "../detectors" }
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+similar.workspace = true
+
+[dev-dependencies]
+assert_cmd = "2.0.17"
+predicates = "3.1.3"
+tempfile = "3.20.0"
+
