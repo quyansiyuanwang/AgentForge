@@ -308,11 +308,24 @@ fn validate_url_has_no_credentials(value: &str, path: &str, diagnostics: &mut Ve
     let Ok(url) = url::Url::parse(value) else {
         return;
     };
-    if !url.username().is_empty() || url.password().is_some() {
+    let sensitive_query = url.query_pairs().any(|(key, _)| {
+        matches!(
+            key.to_ascii_lowercase().as_str(),
+            "token"
+                | "access_token"
+                | "refresh_token"
+                | "api_key"
+                | "apikey"
+                | "password"
+                | "secret"
+                | "credential"
+        )
+    });
+    if !url.username().is_empty() || url.password().is_some() || sensitive_query {
         diagnostics.push(
             Diagnostic::error(
                 DiagnosticCode::UrlContainsCredentials,
-                "URL must not contain user information or credentials",
+                "URL must not contain user information, credentials, or sensitive query parameters",
             )
             .at_path(path)
             .with_remediation("remove credentials and use declared environment variables"),

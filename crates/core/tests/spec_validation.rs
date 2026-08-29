@@ -167,6 +167,15 @@ fn rejects_url_user_information() {
 }
 
 #[test]
+fn rejects_sensitive_url_query_parameters() {
+    let yaml = VALID_SPEC.replace(
+        "https://mcp.example.com/mcp",
+        "https://mcp.example.com/mcp?api_key=secret-value",
+    );
+    assert!(codes(&yaml).contains(&DiagnosticCode::UrlContainsCredentials));
+}
+
+#[test]
 fn requires_mcp_environment_placeholders_to_be_declared() {
     let yaml = VALID_SPEC.replace("    env: [DOCS_MCP_TOKEN]", "    env: [OTHER_TOKEN]");
     assert!(codes(&yaml).contains(&DiagnosticCode::UndeclaredEnvironmentVariable));
