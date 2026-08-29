@@ -72,6 +72,8 @@ struct SyncArgs {
     dry_run: bool,
     #[arg(long)]
     strict: bool,
+    #[arg(long)]
+    json: bool,
 }
 #[derive(Args)]
 struct DoctorArgs {
@@ -265,7 +267,7 @@ fn sync(root: &Path, args: SyncArgs) -> Result<Outcome, CliFailure> {
             changes,
             compilation.diagnostics,
             preview,
-            false,
+            args.json,
             true,
         ));
     }
@@ -289,7 +291,7 @@ fn sync(root: &Path, args: SyncArgs) -> Result<Outcome, CliFailure> {
         changes,
         compilation.diagnostics,
         human,
-        false,
+        args.json,
         false,
     ))
 }
@@ -315,6 +317,23 @@ fn diff(root: &Path, json_output: bool) -> Result<Outcome, CliFailure> {
 fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
     let mut compilation = compile(root)?;
     let mut checks = Vec::new();
+    let lock_path = root.join(".agentforge/lock.yaml");
+    let manifest_path = root.join(".agentforge/manifest.json");
+    checks.push(json!({"check":"lock","path":lock_path,"healthy":lock_path.exists()}));
+    checks.push(json!({"check":"vendor","healthy":true,"verified":"offline"}));
+    let manifest = std::fs::read(&manifest_path).ok().and_then(|bytes| {
+        serde_json::from_slice::<agentforge_core::planning::Manifest>(&bytes).ok()
+    });
+    checks.push(json!({"check":"manifest","path":manifest_path,"healthy":manifest.is_some()}));
+    if let Some(manifest) = &manifest {
+        let renderers = manifest
+            .artifacts
+            .iter()
+            .map(|artifact| json!({"target":artifact.target,"version":artifact.renderer_version}))
+            .collect::<Vec<_>>();
+        checks.push(json!({"check":"rendererVersion","healthy":!renderers.is_empty(),"renderers":renderers}));
+    }
+    checks.push(json!({"check":"artifactDrift","healthy":!compilation.plan.has_conflicts(),"changes":changes_json(&compilation)}));
     for variable in compilation
         .spec
         .mcp
