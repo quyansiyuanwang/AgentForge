@@ -822,15 +822,40 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
     if !args.dry_run {
         atomic_write(&path, rendered.as_bytes()).map_err(runtime)?;
     }
+    let mut human = if args.dry_run {
+        "Would initialize project".to_owned()
+    } else {
+        let compilation = compile(&root)?;
+        if compilation.blocks_apply(args.strict) {
+            let changes = changes_json(&compilation);
+            let preview = human_diff(&compilation);
+            let diagnostics = compilation.diagnostics.clone();
+            return Ok(outcome_value(
+                "init",
+                json!({"path":path,"dryRun":false,"spec":spec,"facts":report.profile,"evidence":report.profile.evidence,"changes":changes}),
+                diagnostics,
+                preview,
+                false,
+                true,
+            ));
+        }
+        if compilation.plan.has_changes() {
+            ApplicationService::new(&root)
+                .apply(&compilation.plan)
+                .map_err(|error| CliFailure {
+                    message: error.to_string(),
+                    exit: 3,
+                })?;
+            format!("Initialized project\n{}", human_diff(&compilation))
+        } else {
+            "Initialized project".to_owned()
+        }
+    };
     Ok(outcome(
         "init",
         json!({"path":path,"dryRun":args.dry_run,"spec":spec,"facts":report.profile,"evidence":report.profile.evidence}),
         report.diagnostics,
-        if args.dry_run {
-            "Would initialize project".into()
-        } else {
-            "Initialized project".into()
-        },
+        std::mem::take(&mut human),
         false,
         false,
     ))
