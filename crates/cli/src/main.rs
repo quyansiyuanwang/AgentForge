@@ -864,6 +864,7 @@ fn mutate_spec(
         ));
     }
     let path = root.join(".agentforge/project.yaml");
+    let previous_rendered = std::fs::read(&path).map_err(runtime)?;
     let rendered = serde_yaml::to_string(&spec).map_err(internal)?;
     let summary = json!({
         "operation": operation,
@@ -879,6 +880,32 @@ fn mutate_spec(
                 rendered.into_bytes(),
             )])
             .map_err(runtime)?;
+        let compilation = match compile(root) {
+            Ok(compilation) => compilation,
+            Err(error) => {
+                restore_spec(root, &previous_rendered);
+                return Err(error);
+            }
+        };
+        if compilation.blocks_apply(false) {
+            let changes = changes_json(&compilation);
+            let preview = human_diff(&compilation);
+            restore_spec(root, &previous_rendered);
+            return Ok(outcome_value(
+                &format!("{kind} {operation}"),
+                json!({"path":path,"dryRun":false,"changed":false,"summary":summary,"changes":changes}),
+                compilation.diagnostics,
+                preview,
+                json_output,
+                true,
+            ));
+        }
+        if compilation.plan.has_changes() {
+            if let Err(error) = ApplicationService::new(root).apply(&compilation.plan) {
+                restore_spec(root, &previous_rendered);
+                return Err(runtime(error));
+            }
+        }
     }
     Ok(outcome_value(
         &format!("{kind} {operation}"),
@@ -892,6 +919,11 @@ fn mutate_spec(
         json_output,
         false,
     ))
+}
+
+fn restore_spec(root: &Path, bytes: &[u8]) {
+    let _ = ApplicationService::new(root)
+        .apply_control_files(&[(PathBuf::from(".agentforge/project.yaml"), bytes.to_vec())]);
 }
 
 fn resource_count(spec: &agentforge_core::model::ProjectSpec, kind: &str) -> usize {
