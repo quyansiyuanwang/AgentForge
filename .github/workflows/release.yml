@@ -47,7 +47,6 @@ jobs:
         shell: bash
         run: |
           "target/${{ matrix.target }}/release/${{ matrix.exe }}" --version
-          test -x "target/${{ matrix.target }}/release/${{ matrix.exe }}" || true
       - name: Archive Unix
         if: runner.os != 'Windows'
         run: tar -czf agentforge-${{ matrix.name }}.tar.gz -C target/${{ matrix.target }}/release ${{ matrix.exe }}
