@@ -1207,6 +1207,19 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
     let previous_context = std::fs::read(&context_file).ok();
     let vendor_root = root.join(".agentforge/vendor");
     let previous_vendor = vendor_root.exists();
+    let vendor_backup = root.join(format!(".agentforge/.vendor-backup-{}", std::process::id()));
+    if !args.dry_run && previous_vendor {
+        if vendor_backup.exists() {
+            return Err(CliFailure {
+                message: format!(
+                    "stale init vendor backup exists: {}",
+                    vendor_backup.display()
+                ),
+                exit: 3,
+            });
+        }
+        std::fs::rename(&vendor_root, &vendor_backup).map_err(runtime)?;
+    }
     if !args.dry_run {
         let empty_lock = LockFile::new(format!("agentforge {}", env!("CARGO_PKG_VERSION")), vec![])
             .map_err(runtime)?
@@ -1334,6 +1347,9 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
             "Initialized project".to_owned()
         }
     };
+    if !args.dry_run && vendor_backup.exists() {
+        std::fs::remove_dir_all(&vendor_backup).map_err(runtime)?;
+    }
     let mut diagnostics = report.diagnostics;
     if args.dry_run {
         for conflict in &planned_conflicts {
@@ -1450,7 +1466,17 @@ fn rollback_init_files(
             let _ = std::fs::remove_file(lock);
         }
     }
-    if !previous_vendor {
+    let vendor_backup = root.join(format!(".agentforge/.vendor-backup-{}", std::process::id()));
+    if vendor_backup.exists() {
+        let vendor = root.join(".agentforge/vendor");
+        if std::fs::symlink_metadata(&vendor)
+            .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            let _ = std::fs::remove_dir_all(&vendor);
+        }
+        let _ = std::fs::rename(&vendor_backup, &vendor);
+    } else if !previous_vendor {
         let vendor = root.join(".agentforge/vendor");
         if std::fs::symlink_metadata(&vendor)
             .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
