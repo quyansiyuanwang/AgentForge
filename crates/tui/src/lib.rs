@@ -14,6 +14,7 @@ pub enum Intent {
     SelectTargets(Vec<Target>),
     ToggleTarget(Target),
     Confirm,
+    Back,
     Cancel,
     Resize { width: u16, height: u16 },
 }
@@ -24,6 +25,77 @@ pub enum FlowState {
     Reviewing { targets: Vec<Target> },
     Confirmed { targets: Vec<Target> },
     Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ReviewContent {
+    pub detection: Vec<String>,
+    pub recommendations: Vec<String>,
+    pub source_risks: Vec<String>,
+    pub changes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewPage {
+    Detection,
+    Recommendations,
+    Sources,
+    Changes,
+}
+
+impl ReviewPage {
+    const fn next(self) -> Option<Self> {
+        match self {
+            Self::Detection => Some(Self::Recommendations),
+            Self::Recommendations => Some(Self::Sources),
+            Self::Sources => Some(Self::Changes),
+            Self::Changes => None,
+        }
+    }
+
+    const fn previous(self) -> Option<Self> {
+        match self {
+            Self::Detection => None,
+            Self::Recommendations => Some(Self::Detection),
+            Self::Sources => Some(Self::Recommendations),
+            Self::Changes => Some(Self::Sources),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReviewState {
+    Reviewing { page: ReviewPage },
+    Confirmed,
+    Cancelled,
+}
+
+impl ReviewState {
+    pub const fn new() -> Self {
+        Self::Reviewing {
+            page: ReviewPage::Detection,
+        }
+    }
+
+    pub fn reduce(self, intent: Intent) -> Self {
+        match (self, intent) {
+            (Self::Reviewing { page }, Intent::Confirm) => match page.next() {
+                Some(page) => Self::Reviewing { page },
+                None => Self::Confirmed,
+            },
+            (Self::Reviewing { page }, Intent::Back) => Self::Reviewing {
+                page: page.previous().unwrap_or(page),
+            },
+            (Self::Reviewing { .. }, Intent::Cancel) => Self::Cancelled,
+            (state, _) => state,
+        }
+    }
+}
+
+impl Default for ReviewState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FlowState {
@@ -90,11 +162,37 @@ pub fn intent_from_event(event: Event) -> Option<Intent> {
         Event::Key(key) => match key.code {
             KeyCode::Enter => Some(Intent::Confirm),
             KeyCode::Esc => Some(Intent::Cancel),
+            KeyCode::Backspace | KeyCode::Left => Some(Intent::Back),
             _ => None,
         },
         Event::Resize(width, height) => Some(normalize_resize(width, height)),
         _ => None,
     }
+}
+
+pub fn review_frame(
+    content: &ReviewContent,
+    state: &ReviewState,
+    profile: TerminalProfile,
+) -> Buffer {
+    let (title, lines) = match state {
+        ReviewState::Reviewing { page } => match page {
+            ReviewPage::Detection => ("Detection facts", &content.detection),
+            ReviewPage::Recommendations => {
+                ("Recommendations and reasons", &content.recommendations)
+            }
+            ReviewPage::Sources => ("Remote source risks", &content.source_risks),
+            ReviewPage::Changes => ("Resolved changes", &content.changes),
+        },
+        ReviewState::Confirmed => ("Confirmed", &content.changes),
+        ReviewState::Cancelled => ("Cancelled", &content.changes),
+    };
+    let body = if lines.is_empty() {
+        "None".to_owned()
+    } else {
+        lines.join("\n")
+    };
+    preview_frame(title, &body, profile)
 }
 
 /// Runs target selection and returns only an intent-derived state. Callers own persistence.
@@ -273,5 +371,49 @@ mod tests {
             intent_from_event(Event::Key(crossterm::event::KeyEvent::from(KeyCode::Esc))),
             Some(Intent::Cancel)
         );
+    }
+
+    #[test]
+    fn review_requires_each_page_confirmation_and_supports_back_cancel() {
+        let state = ReviewState::new()
+            .reduce(Intent::Confirm)
+            .reduce(Intent::Confirm)
+            .reduce(Intent::Back);
+        assert_eq!(
+            state,
+            ReviewState::Reviewing {
+                page: ReviewPage::Recommendations
+            }
+        );
+        assert_eq!(
+            ReviewState::new().reduce(Intent::Cancel),
+            ReviewState::Cancelled
+        );
+        let confirmed = ReviewState::new()
+            .reduce(Intent::Confirm)
+            .reduce(Intent::Confirm)
+            .reduce(Intent::Confirm)
+            .reduce(Intent::Confirm);
+        assert_eq!(confirmed, ReviewState::Confirmed);
+    }
+
+    #[test]
+    fn review_frame_is_stable_at_supported_terminal_sizes() {
+        let content = ReviewContent {
+            detection: vec!["nextjs (0.99)".into()],
+            recommendations: vec!["codex: render AGENTS.md".into()],
+            source_risks: vec!["github skill: executable content".into()],
+            changes: vec!["CREATE AGENTS.md".into()],
+        };
+        let frame = review_frame(&content, &ReviewState::new(), TerminalProfile::compact());
+        assert_eq!(frame.area().width, 80);
+        assert_eq!(frame.area().height, 24);
+        let frame = review_frame(
+            &content,
+            &ReviewState::Confirmed,
+            TerminalProfile::standard(),
+        );
+        assert_eq!(frame.area().width, 120);
+        assert_eq!(frame.area().height, 30);
     }
 }
