@@ -1014,33 +1014,35 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
     };
     let rendered = serde_yaml::to_string(&spec).map_err(internal)?;
     let planned_artifacts = planned_artifacts(&target_values);
+    let lock_path = root.join(".agentforge/lock.yaml");
+    let previous_lock = std::fs::read(&lock_path).ok();
     let report = DetectionEngine::with_builtins().detect(&DetectionContext {
         root: &root,
         filesystem: &RealFileSystem,
     });
     if !args.dry_run {
-        ApplicationService::new(&root)
-            .apply_control_files(&[(
-                PathBuf::from(".agentforge/project.yaml"),
-                rendered.into_bytes(),
-            )])
-            .map_err(runtime)?;
         let empty_lock = LockFile::new(format!("agentforge {}", env!("CARGO_PKG_VERSION")), vec![])
             .map_err(runtime)?
             .to_yaml()
             .map_err(runtime)?;
         ApplicationService::new(&root)
-            .apply_control_files(&[(
-                PathBuf::from(".agentforge/lock.yaml"),
-                empty_lock.into_bytes(),
-            )])
+            .apply_control_files(&[
+                (
+                    PathBuf::from(".agentforge/project.yaml"),
+                    rendered.into_bytes(),
+                ),
+                (
+                    PathBuf::from(".agentforge/lock.yaml"),
+                    empty_lock.into_bytes(),
+                ),
+            ])
             .map_err(runtime)?;
         if spec
             .skills
             .iter()
             .any(|item| !matches!(item.source, agentforge_core::model::Source::Local { .. }))
         {
-            update_resources(
+            if let Err(error) = update_resources(
                 &root,
                 "skill",
                 None,
@@ -1048,14 +1050,17 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 args.json,
                 args.allow_unpinned_source,
                 args.allow_executable_content,
-            )?;
+            ) {
+                rollback_init_files(&root, previous_lock.as_deref());
+                return Err(error);
+            }
         }
         if spec.mcp.iter().any(|item| {
             item.source.as_ref().is_some_and(|source| {
                 !matches!(source, agentforge_core::model::Source::Local { .. })
             })
         }) {
-            update_resources(
+            if let Err(error) = update_resources(
                 &root,
                 "mcp",
                 None,
@@ -1063,17 +1068,27 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 args.json,
                 args.allow_unpinned_source,
                 args.allow_executable_content,
-            )?;
+            ) {
+                rollback_init_files(&root, previous_lock.as_deref());
+                return Err(error);
+            }
         }
     }
     let mut human = if args.dry_run {
         "Would initialize project".to_owned()
     } else {
-        let compilation = compile(&root)?;
+        let compilation = match compile(&root) {
+            Ok(compilation) => compilation,
+            Err(error) => {
+                rollback_init_files(&root, previous_lock.as_deref());
+                return Err(error);
+            }
+        };
         if compilation.blocks_apply(args.strict) {
             let changes = changes_json(&compilation);
             let preview = human_diff(&compilation);
             let diagnostics = compilation.diagnostics.clone();
+            rollback_init_files(&root, previous_lock.as_deref());
             return Ok(outcome_value(
                 "init",
                 json!({"path":path,"dryRun":false,"spec":spec,"facts":report.profile,"evidence":report.profile.evidence,"changes":changes}),
@@ -1084,12 +1099,16 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
             ));
         }
         if compilation.plan.has_changes() {
-            ApplicationService::new(&root)
+            if let Err(error) = ApplicationService::new(&root)
                 .apply(&compilation.plan)
                 .map_err(|error| CliFailure {
                     message: error.to_string(),
                     exit: 3,
-                })?;
+                })
+            {
+                rollback_init_files(&root, previous_lock.as_deref());
+                return Err(error);
+            }
             format!("Initialized project\n{}", human_diff(&compilation))
         } else {
             "Initialized project".to_owned()
@@ -1169,6 +1188,20 @@ fn cli_source(value: &str) -> agentforge_core::model::Source {
         }
     } else {
         agentforge_core::model::Source::Local { path: value.into() }
+    }
+}
+
+fn rollback_init_files(root: &Path, previous_lock: Option<&[u8]>) {
+    let project = root.join(".agentforge/project.yaml");
+    let lock = root.join(".agentforge/lock.yaml");
+    let _ = std::fs::remove_file(project);
+    match previous_lock {
+        Some(bytes) => {
+            let _ = std::fs::write(lock, bytes);
+        }
+        None => {
+            let _ = std::fs::remove_file(lock);
+        }
     }
 }
 

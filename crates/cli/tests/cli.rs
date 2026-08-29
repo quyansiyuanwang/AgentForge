@@ -207,6 +207,26 @@ fn init_non_interactive_requires_explicit_target() {
 }
 
 #[test]
+fn init_validation_failure_does_not_leave_control_files() {
+    let root = tempfile::tempdir().unwrap();
+    let output = cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args([
+            "init",
+            "--non-interactive",
+            "--target",
+            "codex",
+            "--skill",
+            "missing/skill",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(!root.path().join(".agentforge/project.yaml").exists());
+    assert!(!root.path().join(".agentforge/lock.yaml").exists());
+}
+
+#[test]
 fn init_dry_run_reports_planned_artifacts_without_writing() {
     let root = tempfile::tempdir().unwrap();
     let output = cargo_bin_cmd!("agentforge")
