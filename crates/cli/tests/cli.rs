@@ -67,6 +67,20 @@ fn help_exposes_the_stable_command_surface_and_usage_errors_exit_two() {
 }
 
 #[test]
+fn target_list_works_without_a_project_spec() {
+    let root = tempfile::tempdir().unwrap();
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["target", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("generic"))
+        .stdout(predicate::str::contains("codex"))
+        .stdout(predicate::str::contains("claude"))
+        .stdout(predicate::str::contains("copilot"));
+}
+
+#[test]
 fn detect_json_uses_a_clean_stable_envelope() {
     let root = tempfile::tempdir().unwrap();
     let output = cargo_bin_cmd!("agentforge")

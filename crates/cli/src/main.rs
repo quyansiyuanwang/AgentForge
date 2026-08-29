@@ -554,6 +554,29 @@ fn resources(root: &Path, kind: &str, command: ResourceCommand) -> Result<Outcom
             *allow_executable_content,
         );
     }
+    if kind == "target" {
+        if let ResourceCommand::List { json } = command {
+            let targets = [
+                Target::Generic,
+                Target::Codex,
+                Target::Claude,
+                Target::Copilot,
+            ];
+            let data = serde_json::to_value(targets).map_err(internal)?;
+            return Ok(outcome_value(
+                "target list",
+                data,
+                vec![],
+                targets
+                    .iter()
+                    .map(|target| target.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                json,
+                false,
+            ));
+        }
+    }
     let spec = load_spec(root)?;
     match command {
         ResourceCommand::List { json } => {
