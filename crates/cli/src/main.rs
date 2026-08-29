@@ -1390,6 +1390,23 @@ fn resource_exists(spec: &agentforge_core::model::ProjectSpec, kind: &str, id: &
 
 fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
     let root = repository_root().map_err(runtime)?;
+    let path = root.join(".agentforge/project.yaml");
+    if path.exists() {
+        if args.targets.is_empty() && args.skills.is_empty() && args.mcp.is_empty() {
+            return sync(
+                &root,
+                SyncArgs {
+                    dry_run: args.dry_run,
+                    strict: args.strict,
+                    json: args.json,
+                },
+            );
+        }
+        return Err(CliFailure {
+            message: "project spec already exists; use sync or edit it explicitly".into(),
+            exit: 1,
+        });
+    }
     if !root.join(".git").exists()
         && (args.non_interactive || !std::io::stdin().is_terminal())
         && !args.allow_non_git
@@ -1397,13 +1414,6 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         return Err(CliFailure {
             message: "initializing a non-Git directory requires --allow-non-git".into(),
             exit: 2,
-        });
-    }
-    let path = root.join(".agentforge/project.yaml");
-    if path.exists() {
-        return Err(CliFailure {
-            message: "project spec already exists; use sync or edit it explicitly".into(),
-            exit: 1,
         });
     }
     let targets = if args.targets.is_empty() {

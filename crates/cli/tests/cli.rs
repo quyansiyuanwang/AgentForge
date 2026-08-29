@@ -280,6 +280,19 @@ fn init_non_interactive_requires_explicit_target() {
 }
 
 #[test]
+fn init_with_existing_spec_reuses_offline_sync() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path());
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["init", "--non-interactive"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Applied changes"));
+    assert!(root.path().join("AGENTS.md").exists());
+}
+
+#[test]
 fn init_non_interactive_requires_explicit_non_git_authorization() {
     let root = tempfile::tempdir().unwrap();
     cargo_bin_cmd!("agentforge")
