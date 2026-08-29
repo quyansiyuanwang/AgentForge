@@ -156,8 +156,10 @@ impl Source {
 pub struct Mcp {
     pub id: String,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<Source>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub transport: Option<Transport>,
     #[serde(default)]
     pub env: Vec<String>,
@@ -201,8 +203,10 @@ pub struct Settings {
     #[serde(default)]
     pub permissions: Permissions,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<Sandbox>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model_profile: Option<ModelProfile>,
     #[serde(default)]
     pub hooks: Vec<Hook>,
@@ -212,8 +216,10 @@ pub struct Settings {
 #[serde(deny_unknown_fields)]
 pub struct Permissions {
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub shell: Option<Permission>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub network: Option<Permission>,
 }
 
@@ -267,10 +273,13 @@ pub enum HookEvent {
 #[serde(deny_unknown_fields)]
 pub struct Extensions {
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub codex: Option<CodexExtension>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub claude: Option<ClaudeExtension>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub copilot: Option<CopilotExtension>,
 }
 
@@ -278,10 +287,13 @@ pub struct Extensions {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CodexExtension {
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub web_search: Option<WebSearch>,
 }
 
@@ -307,8 +319,10 @@ pub enum WebSearch {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClaudeExtension {
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<ClaudePermissionMode>,
 }
 
@@ -330,6 +344,7 @@ pub enum ClaudePermissionMode {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CopilotExtension {
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mcp_surface: Option<McpSurface>,
 }
 

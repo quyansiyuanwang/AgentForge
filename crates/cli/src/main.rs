@@ -98,6 +98,8 @@ struct InitArgs {
     allow_unpinned_source: bool,
     #[arg(long)]
     allow_executable_content: bool,
+    #[arg(long)]
+    json: bool,
 }
 #[derive(Clone, Copy, clap::ValueEnum)]
 enum TargetArg {
@@ -129,16 +131,22 @@ enum ResourceCommand {
         value: String,
         #[arg(long)]
         dry_run: bool,
+        #[arg(long)]
+        json: bool,
     },
     Remove {
         id: String,
         #[arg(long)]
         dry_run: bool,
+        #[arg(long)]
+        json: bool,
     },
     Update {
         id: Option<String>,
         #[arg(long)]
         dry_run: bool,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -431,17 +439,17 @@ fn config(root: &Path, command: ConfigCommand) -> Result<Outcome, CliFailure> {
 }
 
 fn resources(root: &Path, kind: &str, command: ResourceCommand) -> Result<Outcome, CliFailure> {
-    if let ResourceCommand::Update { id, dry_run } = &command {
-        return update_resources(root, kind, id.as_deref(), *dry_run);
+    if let ResourceCommand::Update { id, dry_run, json } = &command {
+        return update_resources(root, kind, id.as_deref(), *dry_run, *json);
     }
-    let compilation = compile(root)?;
+    let spec = load_spec(root)?;
     match command {
         ResourceCommand::List { json } => {
             let data = match kind {
-                "skill" => serde_json::to_value(&compilation.spec.skills),
-                "mcp" => serde_json::to_value(&compilation.spec.mcp),
-                "subagent" => serde_json::to_value(&compilation.spec.subagents),
-                "target" => serde_json::to_value(&compilation.spec.targets),
+                "skill" => serde_json::to_value(&spec.skills),
+                "mcp" => serde_json::to_value(&spec.mcp),
+                "subagent" => serde_json::to_value(&spec.subagents),
+                "target" => serde_json::to_value(&spec.targets),
                 _ => unreachable!(),
             }
             .map_err(internal)?;
@@ -469,14 +477,30 @@ fn resources(root: &Path, kind: &str, command: ResourceCommand) -> Result<Outcom
                 false,
             ))
         }
-        ResourceCommand::Add { value, dry_run } => {
-            mutate_spec(root, &compilation.spec, kind, "add", &value, dry_run)
-        }
-        ResourceCommand::Remove { id, dry_run } => {
-            mutate_spec(root, &compilation.spec, kind, "remove", &id, dry_run)
+        ResourceCommand::Add {
+            value,
+            dry_run,
+            json,
+        } => mutate_spec(root, &spec, kind, "add", &value, dry_run, json),
+        ResourceCommand::Remove { id, dry_run, json } => {
+            mutate_spec(root, &spec, kind, "remove", &id, dry_run, json)
         }
         ResourceCommand::Update { .. } => unreachable!(),
     }
+}
+
+fn load_spec(root: &Path) -> Result<agentforge_core::model::ProjectSpec, CliFailure> {
+    let text = std::fs::read_to_string(root.join(".agentforge/project.yaml")).map_err(runtime)?;
+    let validation = SpecValidator::new().validate_yaml(&text);
+    validation.spec.ok_or_else(|| CliFailure {
+        message: validation
+            .diagnostics
+            .iter()
+            .map(|item| format!("{}: {}", item.code.as_str(), item.message))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        exit: 1,
+    })
 }
 
 fn update_resources(
@@ -484,6 +508,7 @@ fn update_resources(
     kind: &str,
     selected: Option<&str>,
     dry_run: bool,
+    json_output: bool,
 ) -> Result<Outcome, CliFailure> {
     if !matches!(kind, "skill" | "mcp") {
         return Err(CliFailure {
@@ -598,7 +623,7 @@ fn update_resources(
         } else {
             "Remote sources refreshed".into()
         },
-        false,
+        json_output,
         false,
     ))
 }
@@ -627,6 +652,7 @@ fn mutate_spec(
     operation: &str,
     value: &str,
     dry_run: bool,
+    json_output: bool,
 ) -> Result<Outcome, CliFailure> {
     use agentforge_core::model::{Content, Source};
     let mut spec = current.clone();
@@ -713,7 +739,7 @@ fn mutate_spec(
         } else {
             "Updated project spec".into()
         },
-        false,
+        json_output,
         false,
     ))
 }
@@ -804,7 +830,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         })
         .collect();
     let spec = agentforge_core::model::ProjectSpec {
-        schema_version: "agentforge/v0.1".into(),
+        schema_version: "1".into(),
         project: agentforge_core::model::Project { name },
         targets: target_values,
         instructions: vec![],
@@ -835,7 +861,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 json!({"path":path,"dryRun":false,"spec":spec,"facts":report.profile,"evidence":report.profile.evidence,"changes":changes}),
                 diagnostics,
                 preview,
-                false,
+                args.json,
                 true,
             ));
         }
@@ -856,7 +882,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         json!({"path":path,"dryRun":args.dry_run,"spec":spec,"facts":report.profile,"evidence":report.profile.evidence}),
         report.diagnostics,
         std::mem::take(&mut human),
-        false,
+        args.json,
         false,
     ))
 }

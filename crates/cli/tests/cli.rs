@@ -167,3 +167,31 @@ fn doctor_reports_names_not_secret_values() {
             .starts_with("Healthy")
     );
 }
+
+#[test]
+fn init_non_interactive_generates_spec_and_artifacts() {
+    let root = tempfile::tempdir().unwrap();
+    let output = cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["init", "--non-interactive", "--target", "generic"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(root.path().join(".agentforge/project.yaml").exists());
+    assert!(root.path().join("AGENTS.md").exists());
+    assert!(root.path().join(".agentforge/manifest.json").exists());
+}
+
+#[test]
+fn init_non_interactive_requires_explicit_target() {
+    let root = tempfile::tempdir().unwrap();
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["init", "--non-interactive"])
+        .assert()
+        .code(2);
+}

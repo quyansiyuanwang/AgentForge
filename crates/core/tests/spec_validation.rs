@@ -74,6 +74,30 @@ fn accepts_the_normative_project_spec() {
 }
 
 #[test]
+fn default_optional_fields_round_trip_through_schema() {
+    let spec = agentforge_core::model::ProjectSpec {
+        schema_version: "1".into(),
+        project: agentforge_core::model::Project {
+            name: "empty".into(),
+        },
+        targets: vec![agentforge_core::model::Target::Generic],
+        instructions: vec![],
+        skills: vec![],
+        mcp: vec![],
+        subagents: vec![],
+        settings: Default::default(),
+        extensions: Default::default(),
+    };
+    let yaml = serde_yaml::to_string(&spec).unwrap();
+    let validation = SpecValidator::new().validate_yaml(&yaml);
+    assert!(
+        validation.is_valid(),
+        "{:#?}\n{yaml}",
+        validation.diagnostics
+    );
+}
+
+#[test]
 fn rejects_unknown_fields_at_schema_boundary() {
     let yaml = VALID_SPEC.replace("  name: my-app", "  name: my-app\n  unknown: true");
     assert!(codes(&yaml).contains(&DiagnosticCode::SchemaViolation));
