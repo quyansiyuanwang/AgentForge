@@ -92,6 +92,7 @@ pub fn intent_from_event(event: Event) -> Option<Intent> {
 /// Runs target selection and returns only an intent-derived state. Callers own persistence.
 pub fn run_target_selection() -> io::Result<FlowState> {
     enable_raw_mode()?;
+    let _terminal_guard = TerminalGuard;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
@@ -139,10 +140,18 @@ pub fn run_target_selection() -> io::Result<FlowState> {
             }
         }
     }
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
     Ok(state)
+}
+
+struct TerminalGuard;
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let mut stdout = io::stdout();
+        let _ = execute!(stdout, LeaveAlternateScreen);
+    }
 }
 
 fn target_names(targets: &[Target]) -> String {
