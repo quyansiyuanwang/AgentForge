@@ -1,4 +1,9 @@
-use std::{collections::BTreeMap, fs, panic::AssertUnwindSafe, path::Path};
+use std::{
+    collections::BTreeMap,
+    fs,
+    panic::AssertUnwindSafe,
+    path::{Path, PathBuf},
+};
 
 use agentforge_application::{
     ApplicationService, ApplyError, ApplyValidator, Checkpoint, FaultInjector, NoFaults,
@@ -226,4 +231,34 @@ fn next_run_restores_crash_journal_and_requires_replanning() {
         Err(ApplyError::RecoveredPreviousTransaction)
     ));
     assert_restored(root.path(), &before);
+}
+
+#[test]
+fn control_files_replace_atomically_and_restore_on_invalid_path() {
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir_all(root.path().join(".agentforge")).unwrap();
+    fs::write(root.path().join(".agentforge/project.yaml"), b"old").unwrap();
+    let service = ApplicationService::new(root.path());
+    service
+        .apply_control_files(&[(PathBuf::from(".agentforge/project.yaml"), b"new".to_vec())])
+        .unwrap();
+    assert_eq!(
+        fs::read(root.path().join(".agentforge/project.yaml")).unwrap(),
+        b"new"
+    );
+    let result = service.apply_control_files(&[
+        (
+            PathBuf::from(".agentforge/project.yaml"),
+            b"changed".to_vec(),
+        ),
+        (
+            PathBuf::from(".agentforge/../.git/blocked"),
+            b"bad".to_vec(),
+        ),
+    ]);
+    assert!(result.is_err());
+    assert_eq!(
+        fs::read(root.path().join(".agentforge/project.yaml")).unwrap(),
+        b"new"
+    );
 }
