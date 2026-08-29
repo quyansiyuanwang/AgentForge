@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentforge.dev/schemas/project-v1.json",
+  "title": "AgentForge ProjectSpec v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "project", "targets"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "project": { "$ref": "#/$defs/project" },
+    "targets": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": { "enum": ["generic", "codex", "claude", "copilot"] }
+    },
+    "instructions": { "type": "array", "items": { "$ref": "#/$defs/content" } },
+    "skills": { "type": "array", "items": { "$ref": "#/$defs/content" } },
+    "mcp": { "type": "array", "items": { "$ref": "#/$defs/mcp" } },
+    "subagents": { "type": "array", "items": { "$ref": "#/$defs/subagent" } },
+    "settings": { "$ref": "#/$defs/settings" },
+    "extensions": { "$ref": "#/$defs/extensions" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", "maxLength": 64 },
+    "path": {
+      "type": "string", "minLength": 1, "maxLength": 512,
+      "pattern": "^(?![A-Za-z]:[\\\\/])(?![\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$)).+$"
+    },
+    "env": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" },
+    "project": {
+      "type": "object", "additionalProperties": false, "required": ["name"],
+      "properties": { "name": { "type": "string", "minLength": 1, "maxLength": 128 } }
+    },
+    "source": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["type", "path"],
+          "properties": { "type": { "const": "local" }, "path": { "$ref": "#/$defs/path" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "url"],
+          "properties": { "type": { "const": "url" }, "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+            "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "repository", "rev"],
+          "properties": { "type": { "const": "git" }, "repository": { "type": "string", "format": "uri" },
+            "rev": { "type": "string" }, "subpath": { "$ref": "#/$defs/path" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "ref"],
+          "properties": { "type": { "enum": ["skills-sh", "mcp-registry"] },
+            "ref": { "type": "string" }, "version": { "type": "string" } } }
+      ]
+    },
+    "content": {
+      "type": "object", "additionalProperties": false, "required": ["id", "source"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "source": { "$ref": "#/$defs/source" },
+        "appliesTo": { "type": "array", "uniqueItems": true,
+          "items": { "enum": ["generic", "codex", "claude", "copilot"] } }
+      }
+    },
+    "transport": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["type", "command"],
+          "properties": { "type": { "const": "stdio" }, "command": { "type": "string" },
+            "args": { "type": "array", "items": { "type": "string" } },
+            "env": { "type": "object", "additionalProperties": { "type": "string", "pattern": "^\\$\\{[A-Z_][A-Z0-9_]*\\}$" } } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "url"],
+          "properties": { "type": { "enum": ["streamable-http", "sse"] },
+            "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+            "headers": { "type": "object", "additionalProperties": { "type": "string" } } } }
+      ]
+    },
+    "mcp": {
+      "type": "object", "additionalProperties": false, "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "source": { "$ref": "#/$defs/source" },
+        "transport": { "$ref": "#/$defs/transport" },
+        "env": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/env" } }
+      },
+      "oneOf": [
+        { "required": ["source"], "not": { "required": ["transport"] } },
+        { "required": ["transport"], "not": { "required": ["source"] } }
+      ]
+    },
+    "subagent": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "description", "instructions"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "description": { "type": "string", "minLength": 1 },
+        "instructions": { "$ref": "#/$defs/source" },
+        "skills": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } }
+      }
+    },
+    "settings": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "permissions": { "type": "object", "additionalProperties": false,
+          "properties": { "shell": { "enum": ["deny", "ask", "allow"] },
+            "network": { "enum": ["deny", "ask", "allow"] } } },
+        "sandbox": { "enum": ["read-only", "workspace-write", "full-access"] },
+        "modelProfile": { "enum": ["default", "fast", "balanced", "deep"] },
+        "hooks": { "type": "array", "items": { "type": "object",
+          "required": ["id", "event", "command"], "additionalProperties": false,
+          "properties": { "id": { "$ref": "#/$defs/id" },
+            "event": { "enum": ["session-start", "pre-tool", "post-tool", "session-end"] },
+            "command": { "$ref": "#/$defs/path" }, "args": { "type": "array", "items": { "type": "string" } },
+            "env": { "type": "array", "items": { "$ref": "#/$defs/env" } } } } }
+      }
+    },
+    "extensions": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "codex": { "type": "object", "additionalProperties": false,
+          "properties": { "model": { "type": "string" },
+            "reasoningEffort": { "enum": ["low", "medium", "high", "xhigh", "max"] },
+            "webSearch": { "enum": ["disabled", "cached", "live"] } } },
+        "claude": { "type": "object", "additionalProperties": false,
+          "properties": { "model": { "type": "string" },
+            "permissionMode": { "enum": ["default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"] } } },
+        "copilot": { "type": "object", "additionalProperties": false,
+          "properties": { "mcpSurface": { "enum": ["cli", "cloud-manual"] } } }
+      }
+    }
+  }
+}
+

@@ -1,0 +1,16 @@
+[package]
+name = "agentforge-detectors"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+agentforge-core = { path = "../core" }
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile = "3.20.0"
+
