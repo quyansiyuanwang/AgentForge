@@ -818,14 +818,55 @@ fn update_resources(
         &format!("{kind} update"),
         json!({"updated":updated,"dryRun":dry_run}),
         vec![],
-        if dry_run {
-            "Would refresh remote sources".into()
-        } else {
-            "Remote sources refreshed".into()
-        },
+        source_preview_human(&updated, dry_run),
         json_output,
         false,
     ))
+}
+
+fn source_preview_human(updated: &[Value], dry_run: bool) -> String {
+    let prefix = if dry_run {
+        "Would refresh remote sources"
+    } else {
+        "Remote sources refreshed"
+    };
+    if updated.is_empty() {
+        return format!("{prefix}\nNo remote sources selected");
+    }
+    let mut output = prefix.to_owned();
+    for item in updated {
+        output.push_str(&format!(
+            "\n- {} {}/{} files={} bytes={} executable={}",
+            item["kind"].as_str().unwrap_or("source"),
+            item["id"].as_str().unwrap_or("unknown"),
+            item["sourceType"].as_str().unwrap_or("unknown"),
+            item["fileCount"].as_u64().unwrap_or_default(),
+            item["totalBytes"].as_u64().unwrap_or_default(),
+            item["executableContent"].as_bool().unwrap_or(false)
+        ));
+        if let Some(files) = item["files"].as_array() {
+            for file in files {
+                output.push_str(&format!(
+                    "\n  {} mode={} executable={}",
+                    file["path"].as_str().unwrap_or("unknown"),
+                    file["mode"].as_u64().unwrap_or_default(),
+                    file["executable"].as_bool().unwrap_or(false)
+                ));
+            }
+        }
+        if let Some(env) = item["environment"].as_array()
+            && !env.is_empty()
+        {
+            output.push_str("\n  environment: ");
+            output.push_str(
+                &env.iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+        }
+    }
+    output
 }
 
 fn remote_summary(
