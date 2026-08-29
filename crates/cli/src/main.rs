@@ -907,7 +907,13 @@ fn update_resources(
         Ok(updated) => updated,
         Err(error) => {
             if apply_targets && !dry_run {
-                restore_update_state(root, &lock_path, previous_lock.as_deref(), &vendor_backup);
+                restore_update_state(
+                    root,
+                    &lock_path,
+                    previous_lock.as_deref(),
+                    previous_vendor,
+                    &vendor_backup,
+                );
             }
             return Err(error);
         }
@@ -918,14 +924,26 @@ fn update_resources(
         let compilation = match compile(root) {
             Ok(compilation) => compilation,
             Err(error) => {
-                restore_update_state(root, &lock_path, previous_lock.as_deref(), &vendor_backup);
+                restore_update_state(
+                    root,
+                    &lock_path,
+                    previous_lock.as_deref(),
+                    previous_vendor,
+                    &vendor_backup,
+                );
                 return Err(error);
             }
         };
         generated_changes = changes_json(&compilation);
         if compilation.blocks_apply(strict) {
             let preview = human_diff(&compilation);
-            restore_update_state(root, &lock_path, previous_lock.as_deref(), &vendor_backup);
+            restore_update_state(
+                root,
+                &lock_path,
+                previous_lock.as_deref(),
+                previous_vendor,
+                &vendor_backup,
+            );
             return Ok(outcome_value(
                 &format!("{kind} update"),
                 json!({"updated":updated,"dryRun":false,"changes":changes_json(&compilation)}),
@@ -943,6 +961,7 @@ fn update_resources(
                         root,
                         &lock_path,
                         previous_lock.as_deref(),
+                        previous_vendor,
                         &vendor_backup,
                     );
                     CliFailure {
@@ -1279,6 +1298,7 @@ fn restore_update_state(
     root: &Path,
     lock_path: &Path,
     previous_lock: Option<&[u8]>,
+    previous_vendor: bool,
     vendor_backup: &Path,
 ) {
     match previous_lock {
@@ -1298,6 +1318,14 @@ fn restore_update_state(
             let _ = std::fs::remove_dir_all(&vendor);
         }
         let _ = std::fs::rename(vendor_backup, vendor);
+    } else if !previous_vendor {
+        let vendor = root.join(".agentforge/vendor");
+        if std::fs::symlink_metadata(&vendor)
+            .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            let _ = std::fs::remove_dir_all(vendor);
+        }
     }
 }
 
