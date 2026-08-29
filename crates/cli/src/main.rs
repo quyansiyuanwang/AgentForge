@@ -334,15 +334,15 @@ fn diff(root: &Path, json_output: bool) -> Result<Outcome, CliFailure> {
 }
 
 fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
-    let mut compilation = match compile(root) {
+    let mut compilation = match ProjectCompiler::new(root).compile() {
         Ok(compilation) => compilation,
         Err(error) => {
             let message = error.to_string();
-            let diagnostic = Diagnostic::error(DiagnosticCode::IoFailure, message.clone());
+            let diagnostics = compile_error_diagnostics(error);
             return Ok(outcome_value(
                 "doctor",
                 json!({"health":"Unhealthy","checks":[{"check":"compile","healthy":false,"error":message}]}),
-                vec![diagnostic],
+                diagnostics,
                 "Unhealthy".into(),
                 args.json,
                 true,
@@ -563,6 +563,20 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
         args.json,
         failed,
     ))
+}
+
+fn compile_error_diagnostics(error: CompileError) -> Vec<Diagnostic> {
+    let error = match error {
+        CompileError::InvalidSpec(diagnostics) => return diagnostics,
+        error => error,
+    };
+    let code = match &error {
+        CompileError::Io { .. } | CompileError::NonUtf8(_) => DiagnosticCode::IoFailure,
+        CompileError::Planning(_) => DiagnosticCode::ArtifactConflict,
+        CompileError::Render(_) => DiagnosticCode::UnsupportedCapability,
+        _ => DiagnosticCode::UnknownReference,
+    };
+    vec![Diagnostic::error(code, error.to_string())]
 }
 
 fn config(root: &Path, command: ConfigCommand) -> Result<Outcome, CliFailure> {

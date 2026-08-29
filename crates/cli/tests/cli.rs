@@ -517,6 +517,38 @@ fn doctor_reports_missing_lockfile_as_warning() {
 }
 
 #[test]
+fn doctor_preserves_project_spec_diagnostic_codes() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        root.path(),
+        ".agentforge/project.yaml",
+        "schemaVersion: '1'\nproject: {}\ntargets: [generic]\n",
+    );
+    let output = cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["doctor", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["status"], "failure");
+    assert!(
+        value["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "AF1002")
+    );
+    assert!(
+        !value["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "AF3001")
+    );
+}
+
+#[test]
 fn cli_sync_rebuilds_targets_from_tracked_state() {
     let root = tempfile::tempdir().unwrap();
     cargo_bin_cmd!("agentforge")
