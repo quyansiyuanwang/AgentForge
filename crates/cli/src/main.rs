@@ -90,6 +90,8 @@ struct InitArgs {
     #[arg(long)]
     non_interactive: bool,
     #[arg(long)]
+    allow_non_git: bool,
+    #[arg(long)]
     strict: bool,
     #[arg(long = "target")]
     targets: Vec<TargetArg>,
@@ -1341,6 +1343,15 @@ fn resource_count(spec: &agentforge_core::model::ProjectSpec, kind: &str) -> usi
 
 fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
     let root = repository_root().map_err(runtime)?;
+    if !root.join(".git").exists()
+        && (args.non_interactive || !std::io::stdin().is_terminal())
+        && !args.allow_non_git
+    {
+        return Err(CliFailure {
+            message: "initializing a non-Git directory requires --allow-non-git".into(),
+            exit: 2,
+        });
+    }
     let path = root.join(".agentforge/project.yaml");
     if path.exists() {
         return Err(CliFailure {

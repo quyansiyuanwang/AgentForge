@@ -246,7 +246,13 @@ fn init_non_interactive_generates_spec_and_artifacts() {
     let root = tempfile::tempdir().unwrap();
     let output = cargo_bin_cmd!("agentforge")
         .current_dir(root.path())
-        .args(["init", "--non-interactive", "--target", "generic"])
+        .args([
+            "init",
+            "--non-interactive",
+            "--allow-non-git",
+            "--target",
+            "generic",
+        ])
         .output()
         .unwrap();
     assert!(
@@ -268,9 +274,21 @@ fn init_non_interactive_requires_explicit_target() {
     let root = tempfile::tempdir().unwrap();
     cargo_bin_cmd!("agentforge")
         .current_dir(root.path())
-        .args(["init", "--non-interactive"])
+        .args(["init", "--non-interactive", "--allow-non-git"])
         .assert()
         .code(2);
+}
+
+#[test]
+fn init_non_interactive_requires_explicit_non_git_authorization() {
+    let root = tempfile::tempdir().unwrap();
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["init", "--non-interactive", "--target", "generic"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("--allow-non-git"));
+    assert!(!root.path().join(".agentforge/project.yaml").exists());
 }
 
 #[test]
@@ -286,6 +304,7 @@ fn init_validation_failure_does_not_leave_control_files() {
         .args([
             "init",
             "--non-interactive",
+            "--allow-non-git",
             "--target",
             "codex",
             "--skill",
@@ -310,6 +329,7 @@ fn init_dry_run_reports_planned_artifacts_without_writing() {
         .args([
             "init",
             "--non-interactive",
+            "--allow-non-git",
             "--target",
             "codex",
             "--dry-run",
@@ -345,6 +365,7 @@ fn init_dry_run_reports_unmanaged_target_conflicts() {
         .args([
             "init",
             "--non-interactive",
+            "--allow-non-git",
             "--target",
             "codex",
             "--dry-run",
@@ -367,6 +388,7 @@ fn init_three_vendor_targets_is_idempotent() {
         .args([
             "init",
             "--non-interactive",
+            "--allow-non-git",
             "--target",
             "codex",
             "--target",
@@ -408,6 +430,7 @@ fn nextjs_project_full_offline_rebuild_e2e() {
         .args([
             "init",
             "--non-interactive",
+            "--allow-non-git",
             "--target",
             "codex",
             "--target",
@@ -498,7 +521,13 @@ fn cli_sync_rebuilds_targets_from_tracked_state() {
     let root = tempfile::tempdir().unwrap();
     cargo_bin_cmd!("agentforge")
         .current_dir(root.path())
-        .args(["init", "--non-interactive", "--target", "generic"])
+        .args([
+            "init",
+            "--non-interactive",
+            "--allow-non-git",
+            "--target",
+            "generic",
+        ])
         .assert()
         .success();
     let generated = root.path().join("AGENTS.md");
