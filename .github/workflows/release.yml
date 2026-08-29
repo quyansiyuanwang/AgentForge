@@ -54,7 +54,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: Compress-Archive -Path "target/${{ matrix.target }}/release/${{ matrix.exe }}" -DestinationPath "agentforge-${{ matrix.name }}.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agentforge-${{ matrix.name }}
           path: agentforge-${{ matrix.name }}.*
