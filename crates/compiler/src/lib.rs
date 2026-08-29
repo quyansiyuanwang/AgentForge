@@ -61,6 +61,8 @@ pub enum CompileError {
     MissingLock { kind: ContentKind, id: String },
     #[error("local source escapes the repository: {0}")]
     EscapingLocalSource(String),
+    #[error("local source has no file name: {0}")]
+    InvalidLocalPath(String),
     #[error("source {kind:?}/{id} has no usable content")]
     EmptySource { kind: ContentKind, id: String },
     #[error("source {kind:?}/{id} must resolve to one text file")]
@@ -358,8 +360,11 @@ fn read_local(root: &Path, relative: &str) -> Result<Vec<ResolvedFile>, CompileE
         return Err(CompileError::EscapingLocalSource(relative.into()));
     }
     if canonical.is_file() {
+        let file_name = canonical
+            .file_name()
+            .ok_or_else(|| CompileError::InvalidLocalPath(relative.into()))?;
         return Ok(vec![ResolvedFile {
-            path: canonical.file_name().unwrap().to_string_lossy().into(),
+            path: file_name.to_string_lossy().into(),
             content: fs::read(&canonical).map_err(|source| io_error(&canonical, source))?,
         }]);
     }

@@ -1948,6 +1948,7 @@ fn compile(root: &Path) -> Result<Compilation, CliFailure> {
             | CompileError::InvalidLock(_)
             | CompileError::InvalidManifest(_)
             | CompileError::Vendor(_)
+            | CompileError::InvalidLocalPath(_)
             | CompileError::EmptySource { .. }
             | CompileError::AmbiguousTextSource { .. }
             | CompileError::InvalidMcp(_) => CliFailure {
