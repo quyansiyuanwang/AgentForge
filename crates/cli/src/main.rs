@@ -225,6 +225,7 @@ fn main() -> ExitCode {
     }
 }
 
+#[derive(Debug)]
 struct CliFailure {
     message: String,
     exit: u8,
