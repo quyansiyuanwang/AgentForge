@@ -11,6 +11,38 @@ pub enum Intent {
     Resize { width: u16, height: u16 },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FlowState {
+    Selecting { targets: Vec<Target> },
+    Reviewing { targets: Vec<Target> },
+    Confirmed { targets: Vec<Target> },
+    Cancelled,
+}
+
+impl FlowState {
+    pub fn new() -> Self {
+        Self::Selecting {
+            targets: Vec::new(),
+        }
+    }
+
+    pub fn reduce(self, intent: Intent) -> Self {
+        match (self, intent) {
+            (Self::Selecting { .. }, Intent::SelectTargets(targets)) => Self::Reviewing { targets },
+            (Self::Reviewing { targets }, Intent::Confirm) => Self::Confirmed { targets },
+            (Self::Selecting { .. } | Self::Reviewing { .. }, Intent::Cancel) => Self::Cancelled,
+            (state, Intent::Resize { .. }) => state,
+            (state, _) => state,
+        }
+    }
+}
+
+impl Default for FlowState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TerminalProfile {
     pub width: u16,
@@ -63,6 +95,23 @@ mod tests {
                 height: 24
             }
             .supports_minimum()
+        );
+    }
+
+    #[test]
+    fn confirmation_is_explicit_and_cancel_is_terminal() {
+        let state = FlowState::new()
+            .reduce(Intent::SelectTargets(vec![Target::Codex]))
+            .reduce(Intent::Confirm);
+        assert_eq!(
+            state,
+            FlowState::Confirmed {
+                targets: vec![Target::Codex]
+            }
+        );
+        assert_eq!(
+            FlowState::new().reduce(Intent::Cancel),
+            FlowState::Cancelled
         );
     }
 }
