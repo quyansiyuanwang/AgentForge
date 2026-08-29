@@ -2098,8 +2098,9 @@ fn internal(error: impl std::fmt::Display) -> CliFailure {
 
 #[cfg(test)]
 mod tests {
-    use super::{cli_source, redact_text};
+    use super::{cli_source, redact_text, restore_update_state};
     use agentforge_core::model::Source;
+    use std::fs;
 
     #[test]
     fn sensitive_diff_lines_are_redacted() {
@@ -2107,6 +2108,27 @@ mod tests {
         assert!(!output.contains("do-not-print"));
         assert!(output.contains("[REDACTED SENSITIVE LINE]"));
         assert!(output.contains("command: safe"));
+    }
+
+    #[test]
+    fn update_rollback_restores_or_removes_vendor_tree() {
+        let root = tempfile::tempdir().unwrap();
+        let vendor = root.path().join(".agentforge/vendor");
+        fs::create_dir_all(&vendor).unwrap();
+        fs::write(vendor.join("old.txt"), b"old").unwrap();
+        let backup = root.path().join(".agentforge/.update-vendor-backup");
+        fs::rename(&vendor, &backup).unwrap();
+        fs::create_dir_all(&vendor).unwrap();
+        fs::write(vendor.join("new.txt"), b"new").unwrap();
+        let lock = root.path().join(".agentforge/lock.yaml");
+        restore_update_state(root.path(), &lock, None, true, &backup);
+        assert!(vendor.join("old.txt").exists());
+        assert!(!vendor.join("new.txt").exists());
+
+        fs::create_dir_all(&vendor).unwrap();
+        fs::write(vendor.join("new.txt"), b"new").unwrap();
+        restore_update_state(root.path(), &lock, None, false, &backup);
+        assert!(!vendor.exists());
     }
 
     #[test]
