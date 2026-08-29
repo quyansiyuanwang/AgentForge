@@ -35,7 +35,6 @@ permissions:
   shell: ask
   network: allow
 sandbox: workspace-write
-modelProfile: null
 hooks:
 - id: validate
   event: post-tool
