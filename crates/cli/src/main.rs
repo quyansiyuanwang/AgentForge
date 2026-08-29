@@ -520,9 +520,9 @@ fn config(root: &Path, command: ConfigCommand) -> Result<Outcome, CliFailure> {
             ))
         }
         ConfigCommand::Show { json } => {
-            let compilation = compile(root)?;
-            let data = serde_json::to_value(&compilation.spec).map_err(internal)?;
-            let human = serde_yaml::to_string(&compilation.spec).map_err(internal)?;
+            let spec = load_spec(root)?;
+            let data = serde_json::to_value(&spec).map_err(internal)?;
+            let human = serde_yaml::to_string(&spec).map_err(internal)?;
             Ok(outcome_value(
                 "config show",
                 data,

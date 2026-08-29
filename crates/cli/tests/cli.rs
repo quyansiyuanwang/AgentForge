@@ -122,6 +122,22 @@ fn config_validate_reports_business_failure_as_exit_one() {
 }
 
 #[test]
+fn config_show_reads_spec_without_lock_or_generated_state() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        root.path(),
+        ".agentforge/project.yaml",
+        "schemaVersion: '1'\nproject: { name: inspectable }\ntargets: [codex]\n",
+    );
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["config", "show", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("inspectable"));
+}
+
+#[test]
 fn sync_is_idempotent_diff_detects_drift_and_strict_blocks_warnings() {
     let root = tempfile::tempdir().unwrap();
     setup(root.path());
