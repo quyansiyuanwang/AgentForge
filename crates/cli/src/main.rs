@@ -1026,7 +1026,9 @@ fn mutate_spec(
     let compilation = match compile(root) {
         Ok(compilation) => compilation,
         Err(error) => {
-            restore_spec(root, &previous_rendered);
+            if let Err(restore_error) = restore_spec(root, &previous_rendered) {
+                return Err(restore_error);
+            }
             return Err(error);
         }
     };
@@ -1034,7 +1036,7 @@ fn mutate_spec(
         let changes = changes_json(&compilation);
         let preview = human_diff(&compilation);
         let blocked = compilation.blocks_apply(false);
-        restore_spec(root, &previous_rendered);
+        restore_spec(root, &previous_rendered)?;
         return Ok(outcome_value(
             &format!("{kind} {operation}"),
             json!({"path":path,"dryRun":true,"changed":compilation.plan.has_changes(),"summary":summary,"changes":changes}),
@@ -1048,7 +1050,7 @@ fn mutate_spec(
         if compilation.blocks_apply(false) {
             let changes = changes_json(&compilation);
             let preview = human_diff(&compilation);
-            restore_spec(root, &previous_rendered);
+            restore_spec(root, &previous_rendered)?;
             return Ok(outcome_value(
                 &format!("{kind} {operation}"),
                 json!({"path":path,"dryRun":false,"changed":false,"summary":summary,"changes":changes}),
@@ -1060,7 +1062,9 @@ fn mutate_spec(
         }
         if compilation.plan.has_changes() {
             if let Err(error) = ApplicationService::new(root).apply(&compilation.plan) {
-                restore_spec(root, &previous_rendered);
+                if let Err(restore_error) = restore_spec(root, &previous_rendered) {
+                    return Err(restore_error);
+                }
                 return Err(runtime(error));
             }
         }
@@ -1079,9 +1083,10 @@ fn mutate_spec(
     ))
 }
 
-fn restore_spec(root: &Path, bytes: &[u8]) {
-    let _ = ApplicationService::new(root)
-        .apply_control_files(&[(PathBuf::from(".agentforge/project.yaml"), bytes.to_vec())]);
+fn restore_spec(root: &Path, bytes: &[u8]) -> Result<(), CliFailure> {
+    ApplicationService::new(root)
+        .apply_control_files(&[(PathBuf::from(".agentforge/project.yaml"), bytes.to_vec())])
+        .map_err(runtime)
 }
 
 fn resource_count(spec: &agentforge_core::model::ProjectSpec, kind: &str) -> usize {
