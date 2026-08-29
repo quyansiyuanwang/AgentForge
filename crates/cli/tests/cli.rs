@@ -480,6 +480,32 @@ fn sync_json_returns_envelope() {
 }
 
 #[test]
+fn remote_update_dry_run_exposes_pinned_source_inventory() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path());
+    let output = cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args([
+            "skill",
+            "update",
+            "--dry-run",
+            "--json",
+            "--allow-unpinned-source",
+        ])
+        .output()
+        .unwrap();
+    // The fixture skill is local, so update remains a successful no-op with a stable envelope.
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "skill update");
+    assert!(value["data"]["updated"].is_array());
+}
+
+#[test]
 fn resource_remove_edits_canonical_spec_without_vendor_access() {
     let root = tempfile::tempdir().unwrap();
     setup(root.path());

@@ -711,6 +711,8 @@ fn update_resources(
                         .await
                         .map_err(|error| error.to_string())?
                     {
+                        let summary =
+                            remote_summary(ContentKind::Skill, &item.id, &lock, &vendor, &[]);
                         if !dry_run {
                             pending_vendor.push((lock.vendor_path.clone(), vendor));
                             cleanup_vendor.push(PathBuf::from(
@@ -721,7 +723,7 @@ fn update_resources(
                             !(entry.kind == ContentKind::Skill && entry.id == item.id)
                         });
                         entries.push(*lock);
-                        changed.push(item.id.clone());
+                        changed.push(summary);
                     }
                 }
             } else {
@@ -753,6 +755,13 @@ fn update_resources(
                         .await
                         .map_err(|error| error.to_string())?
                     {
+                        let summary = remote_summary(
+                            ContentKind::Mcp,
+                            &item.0.id,
+                            &lock,
+                            &vendor,
+                            &item.0.env,
+                        );
                         if !dry_run {
                             pending_vendor.push((lock.vendor_path.clone(), vendor));
                             cleanup_vendor.push(PathBuf::from(
@@ -763,7 +772,7 @@ fn update_resources(
                             !(entry.kind == ContentKind::Mcp && entry.id == item.0.id)
                         });
                         entries.push(*lock);
-                        changed.push(item.0.id.clone());
+                        changed.push(summary);
                     }
                 }
             }
@@ -808,6 +817,34 @@ fn update_resources(
         json_output,
         false,
     ))
+}
+
+fn remote_summary(
+    kind: ContentKind,
+    id: &str,
+    lock: &agentforge_sources::LockEntry,
+    vendor: &agentforge_sources::security::VendorTree,
+    env: &[String],
+) -> Value {
+    json!({
+        "kind": kind,
+        "id": id,
+        "sourceType": lock.source_type,
+        "requested": lock.requested_locator,
+        "resolved": lock.resolved_locator,
+        "version": lock.resolved_version,
+        "vendorPath": lock.vendor_path,
+        "sha256": lock.sha256,
+        "fileCount": vendor.files.len(),
+        "totalBytes": vendor.total_bytes,
+        "files": vendor.files.iter().map(|file| json!({
+            "path": file.path,
+            "mode": file.mode,
+            "executable": file.executable
+        })).collect::<Vec<_>>(),
+        "environment": env,
+        "executableContent": vendor.executable_content
+    })
 }
 
 fn mutate_spec(
