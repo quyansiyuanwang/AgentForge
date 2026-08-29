@@ -338,6 +338,7 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
     let mut checks = Vec::new();
     let lock_path = root.join(".agentforge/lock.yaml");
     let manifest_path = root.join(".agentforge/manifest.json");
+    let mut vendor_source_count = 0usize;
     checks.push(json!({"check":"lock","path":lock_path,"healthy":lock_path.exists()}));
     if !lock_path.exists() {
         compilation.diagnostics.push(
@@ -352,6 +353,7 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
     }
     if let Ok(bytes) = std::fs::read(&lock_path) {
         if let Ok(lock) = serde_yaml::from_slice::<LockFile>(&bytes) {
+            vendor_source_count = lock.sources.len();
             let mut referenced = std::collections::BTreeSet::new();
             for item in &compilation.spec.instructions {
                 if !matches!(item.source, agentforge_core::model::Source::Local { .. }) {
@@ -393,7 +395,12 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
             }
         }
     }
-    checks.push(json!({"check":"vendor","healthy":true,"verified":"offline"}));
+    checks.push(json!({
+        "check":"vendor",
+        "healthy":true,
+        "verified":"offline",
+        "sourceCount":vendor_source_count
+    }));
     let manifest = std::fs::read(&manifest_path).ok().and_then(|bytes| {
         serde_json::from_slice::<agentforge_core::planning::Manifest>(&bytes).ok()
     });
