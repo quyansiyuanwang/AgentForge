@@ -207,6 +207,42 @@ fn init_non_interactive_requires_explicit_target() {
 }
 
 #[test]
+fn init_three_vendor_targets_is_idempotent() {
+    let root = tempfile::tempdir().unwrap();
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args([
+            "init",
+            "--non-interactive",
+            "--target",
+            "codex",
+            "--target",
+            "claude",
+            "--target",
+            "copilot",
+        ])
+        .assert()
+        .success();
+    assert!(root.path().join("AGENTS.md").exists());
+    assert!(root.path().join("CLAUDE.md").exists());
+    assert!(root.path().join(".github/copilot-instructions.md").exists());
+    assert!(root.path().join(".agentforge/lock.yaml").exists());
+    assert!(root.path().join(".agentforge/manifest.json").exists());
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .arg("sync")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No changes"));
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .arg("diff")
+        .assert()
+        .success()
+        .stdout("Clean\n");
+}
+
+#[test]
 fn sync_json_returns_envelope() {
     let root = tempfile::tempdir().unwrap();
     setup(root.path());
