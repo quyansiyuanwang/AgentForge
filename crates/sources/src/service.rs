@@ -152,6 +152,9 @@ impl<H: HttpFetcher, G: GitFetcher> SourceService<H, G> {
         url: &str,
         expected: Option<&str>,
     ) -> Result<ResolvedSource, SourceError> {
+        if expected.is_none() && !request.allow_unpinned {
+            return Err(SourceError::Unpinned(url.into()));
+        }
         let response = self.http.get(url, self.limits.max_file_bytes).await?;
         let content_hash = bytes_hash(&response.body);
         if let Some(expected) = expected.filter(|expected| *expected != content_hash) {

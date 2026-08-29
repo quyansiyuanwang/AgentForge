@@ -116,6 +116,21 @@ async fn checksum_mismatch_is_rejected() {
 }
 
 #[tokio::test]
+async fn unpinned_url_requires_explicit_authorization() {
+    let source = Source::Url {
+        url: "https://example.com/content".into(),
+        sha256: None,
+    };
+    let (client, _) = http(b"hello", "https://example.com/content");
+    assert!(matches!(
+        SourceService::new(client, Git)
+            .resolve(request(&source))
+            .await,
+        Err(SourceError::Unpinned(_))
+    ));
+}
+
+#[tokio::test]
 async fn skills_require_pin_then_lock_commit() {
     let source = Source::SkillsSh {
         r#ref: "owner/repo/testing".into(),
