@@ -15,6 +15,7 @@ agentforge-compiler = { path = "../compiler" }
 agentforge-core = { path = "../core" }
 agentforge-detectors = { path = "../detectors" }
 agentforge-sources = { path = "../sources" }
+agentforge-tui = { path = "../tui" }
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

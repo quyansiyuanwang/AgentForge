@@ -1,5 +1,6 @@
 use std::{
     env,
+    io::IsTerminal,
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, ExitCode},
 };
@@ -838,17 +839,44 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
             exit: 1,
         });
     }
-    if args.targets.is_empty() {
-        return Err(CliFailure {
-            message: if args.non_interactive {
-                "--non-interactive requires at least one --target".into()
-            } else {
-                "init requires an explicit --target; interactive selection is not available in this terminal".into()
-            },
-            exit: 2,
-        });
-    }
-    let targets = args.targets;
+    let targets = if args.targets.is_empty() {
+        if args.non_interactive || !std::io::stdin().is_terminal() {
+            return Err(CliFailure {
+                message: if args.non_interactive {
+                    "--non-interactive requires at least one --target".into()
+                } else {
+                    "init requires an explicit --target when no interactive terminal is available"
+                        .into()
+                },
+                exit: 2,
+            });
+        }
+        match agentforge_tui::run_target_selection().map_err(runtime)? {
+            agentforge_tui::FlowState::Confirmed { targets } if !targets.is_empty() => targets
+                .into_iter()
+                .map(|target| match target {
+                    Target::Generic => TargetArg::Generic,
+                    Target::Codex => TargetArg::Codex,
+                    Target::Claude => TargetArg::Claude,
+                    Target::Copilot => TargetArg::Copilot,
+                })
+                .collect(),
+            agentforge_tui::FlowState::Cancelled => {
+                return Err(CliFailure {
+                    message: "init cancelled".into(),
+                    exit: 1,
+                });
+            }
+            _ => {
+                return Err(CliFailure {
+                    message: "at least one target must be selected".into(),
+                    exit: 2,
+                });
+            }
+        }
+    } else {
+        args.targets
+    };
     let mut target_values = targets
         .into_iter()
         .map(|target| match target {
