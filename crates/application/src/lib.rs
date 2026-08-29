@@ -188,6 +188,7 @@ impl<V: ApplyValidator, F: FaultInjector> ApplicationService<V, F> {
         let result = (|| {
             for (relative, bytes) in files {
                 let relative_text = relative.to_string_lossy().replace('\\', "/");
+                validate_relative(&relative_text)?;
                 validate_repository_path(&self.root, &relative_text)?;
                 let target = self.root.join(relative);
                 let staged = transaction.path().join(&relative_text);

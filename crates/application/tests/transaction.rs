@@ -251,10 +251,7 @@ fn control_files_replace_atomically_and_restore_on_invalid_path() {
             PathBuf::from(".agentforge/project.yaml"),
             b"changed".to_vec(),
         ),
-        (
-            PathBuf::from(".agentforge/../.git/blocked"),
-            b"bad".to_vec(),
-        ),
+        (PathBuf::from(".git/blocked"), b"bad".to_vec()),
     ]);
     assert!(result.is_err());
     assert_eq!(
