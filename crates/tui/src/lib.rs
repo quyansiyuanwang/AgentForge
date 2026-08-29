@@ -250,6 +250,41 @@ pub fn run_target_selection() -> io::Result<FlowState> {
     Ok(state)
 }
 
+/// Runs the read-only review wizard. The caller applies the confirmed plan.
+pub fn run_review(content: ReviewContent) -> io::Result<ReviewState> {
+    enable_raw_mode()?;
+    let _terminal_guard = TerminalGuard;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = ratatui::backend::CrosstermBackend::new(stdout);
+    let mut terminal = ratatui::Terminal::new(backend)?;
+    let mut state = ReviewState::new();
+    loop {
+        terminal.draw(|frame| {
+            let area = frame.area();
+            let buffer = review_frame(
+                &content,
+                &state,
+                TerminalProfile {
+                    width: area.width,
+                    height: area.height,
+                },
+            );
+            frame.render_widget(Paragraph::new(buffer_to_text(&buffer)), area);
+        })?;
+        if matches!(state, ReviewState::Confirmed | ReviewState::Cancelled) {
+            break;
+        }
+        if event::poll(std::time::Duration::from_millis(100))? {
+            if let Some(intent) = intent_from_event(event::read()?) {
+                state = state.reduce(intent);
+            }
+        }
+    }
+    terminal.show_cursor()?;
+    Ok(state)
+}
+
 struct TerminalGuard;
 
 impl Drop for TerminalGuard {
@@ -270,6 +305,20 @@ fn target_names(targets: &[Target]) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     }
+}
+
+fn buffer_to_text(buffer: &Buffer) -> String {
+    let area = buffer.area;
+    (0..area.height)
+        .map(|row| {
+            (0..area.width)
+                .map(|column| buffer[(column, row)].symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn toggle_target(mut targets: Vec<Target>, target: Target) -> Vec<Target> {

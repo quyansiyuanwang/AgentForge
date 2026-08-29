@@ -1215,6 +1215,50 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         settings: Default::default(),
         extensions: Default::default(),
     };
+    if !args.non_interactive && std::io::stdin().is_terminal() {
+        let review = agentforge_tui::ReviewContent {
+            detection: vec![
+                format!("languages: {}", join(&report.profile.languages)),
+                format!("frameworks: {}", join(&report.profile.frameworks)),
+                format!("databases: {}", join(&report.profile.databases)),
+                format!(
+                    "package managers: {}",
+                    join(&report.profile.package_managers)
+                ),
+                format!("tests: {}", join(&report.profile.tests)),
+                format!("ci: {}", join(&report.profile.ci)),
+            ],
+            recommendations: target_values
+                .iter()
+                .map(|target| format!("{} renderer selected", target.as_str()))
+                .collect(),
+            source_risks: args
+                .skills
+                .iter()
+                .chain(args.mcp.iter())
+                .map(|source| format!("source: {source}"))
+                .collect(),
+            changes: planned_artifacts(&target_values)
+                .into_iter()
+                .map(|path| format!("CREATE {path}"))
+                .collect(),
+        };
+        match agentforge_tui::run_review(review).map_err(runtime)? {
+            agentforge_tui::ReviewState::Confirmed => {}
+            agentforge_tui::ReviewState::Cancelled => {
+                return Err(CliFailure {
+                    message: "init review cancelled".into(),
+                    exit: 1,
+                });
+            }
+            agentforge_tui::ReviewState::Reviewing { .. } => {
+                return Err(CliFailure {
+                    message: "init review ended before confirmation".into(),
+                    exit: 1,
+                });
+            }
+        }
+    }
     let rendered = serde_yaml::to_string(&spec).map_err(internal)?;
     let planned_artifacts = planned_artifacts(&target_values);
     let planned_conflicts = planned_artifacts
