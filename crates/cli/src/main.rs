@@ -150,6 +150,10 @@ enum ResourceCommand {
         dry_run: bool,
         #[arg(long)]
         json: bool,
+        #[arg(long)]
+        allow_unpinned_source: bool,
+        #[arg(long)]
+        allow_executable_content: bool,
     },
 }
 
@@ -521,8 +525,23 @@ fn config(root: &Path, command: ConfigCommand) -> Result<Outcome, CliFailure> {
 }
 
 fn resources(root: &Path, kind: &str, command: ResourceCommand) -> Result<Outcome, CliFailure> {
-    if let ResourceCommand::Update { id, dry_run, json } = &command {
-        return update_resources(root, kind, id.as_deref(), *dry_run, *json, false, false);
+    if let ResourceCommand::Update {
+        id,
+        dry_run,
+        json,
+        allow_unpinned_source,
+        allow_executable_content,
+    } = &command
+    {
+        return update_resources(
+            root,
+            kind,
+            id.as_deref(),
+            *dry_run,
+            *json,
+            *allow_unpinned_source,
+            *allow_executable_content,
+        );
     }
     let spec = load_spec(root)?;
     match command {
