@@ -157,6 +157,15 @@ enum ResourceCommand {
     },
 }
 
+#[derive(Clone, Copy)]
+struct UpdateOptions {
+    dry_run: bool,
+    json_output: bool,
+    allow_unpinned: bool,
+    allow_executable_content: bool,
+    apply_targets: bool,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "lowercase")]
 enum Status {
@@ -609,10 +618,13 @@ fn resources(root: &Path, kind: &str, command: ResourceCommand) -> Result<Outcom
             root,
             kind,
             id.as_deref(),
-            *dry_run,
-            *json,
-            *allow_unpinned_source,
-            *allow_executable_content,
+            UpdateOptions {
+                dry_run: *dry_run,
+                json_output: *json,
+                allow_unpinned: *allow_unpinned_source,
+                allow_executable_content: *allow_executable_content,
+                apply_targets: true,
+            },
         );
     }
     if kind == "target" {
@@ -703,11 +715,15 @@ fn update_resources(
     root: &Path,
     kind: &str,
     selected: Option<&str>,
-    dry_run: bool,
-    json_output: bool,
-    allow_unpinned: bool,
-    allow_executable_content: bool,
+    options: UpdateOptions,
 ) -> Result<Outcome, CliFailure> {
+    let UpdateOptions {
+        dry_run,
+        json_output,
+        allow_unpinned,
+        allow_executable_content,
+        apply_targets,
+    } = options;
     if !matches!(kind, "skill" | "mcp") {
         return Err(CliFailure {
             message: "only skill and mcp support remote update".into(),
@@ -862,11 +878,44 @@ fn update_resources(
             Ok::<_, String>(changed)
         })
         .map_err(|message| CliFailure { message, exit: 3 })?;
+    let mut generated_preview = String::new();
+    if apply_targets && !dry_run {
+        let compilation = compile(root)?;
+        if compilation.blocks_apply(false) {
+            let preview = human_diff(&compilation);
+            return Ok(outcome_value(
+                &format!("{kind} update"),
+                json!({"updated":updated,"dryRun":false,"changes":changes_json(&compilation)}),
+                compilation.diagnostics,
+                preview,
+                json_output,
+                true,
+            ));
+        }
+        if compilation.plan.has_changes() {
+            ApplicationService::new(root)
+                .apply(&compilation.plan)
+                .map_err(|error| CliFailure {
+                    message: error.to_string(),
+                    exit: 3,
+                })?;
+            generated_preview = human_diff(&compilation);
+        }
+    }
+    let human = if generated_preview.is_empty() {
+        source_preview_human(&updated, dry_run)
+    } else {
+        format!(
+            "{}\n{}",
+            source_preview_human(&updated, dry_run),
+            generated_preview
+        )
+    };
     Ok(outcome_value(
         &format!("{kind} update"),
         json!({"updated":updated,"dryRun":dry_run}),
         vec![],
-        source_preview_human(&updated, dry_run),
+        human,
         json_output,
         false,
     ))
@@ -1413,10 +1462,13 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 &root,
                 "skill",
                 None,
-                false,
-                args.json,
-                args.allow_unpinned_source,
-                args.allow_executable_content,
+                UpdateOptions {
+                    dry_run: false,
+                    json_output: args.json,
+                    allow_unpinned: args.allow_unpinned_source,
+                    allow_executable_content: args.allow_executable_content,
+                    apply_targets: false,
+                },
             ) {
                 Ok(outcome) => remote_previews.push(outcome.human),
                 Err(error) => {
@@ -1439,10 +1491,13 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 &root,
                 "mcp",
                 None,
-                false,
-                args.json,
-                args.allow_unpinned_source,
-                args.allow_executable_content,
+                UpdateOptions {
+                    dry_run: false,
+                    json_output: args.json,
+                    allow_unpinned: args.allow_unpinned_source,
+                    allow_executable_content: args.allow_executable_content,
+                    apply_targets: false,
+                },
             ) {
                 Ok(outcome) => remote_previews.push(outcome.human),
                 Err(error) => {
