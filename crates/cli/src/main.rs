@@ -579,6 +579,7 @@ fn update_resources(
             let service = SourceService::new(http, ProcessGitFetcher::default());
             let mut entries = existing.sources.clone();
             let mut changed = Vec::new();
+            let mut pending_vendor = Vec::new();
             if kind == "skill" {
                 for item in spec
                     .skills
@@ -601,7 +602,7 @@ fn update_resources(
                         .map_err(|error| error.to_string())?
                     {
                         if !dry_run {
-                            write_vendor(root, &lock.vendor_path, &vendor)?;
+                            pending_vendor.push((lock.vendor_path.clone(), vendor));
                         }
                         entries.retain(|entry| {
                             !(entry.kind == ContentKind::Skill && entry.id == item.id)
@@ -633,7 +634,7 @@ fn update_resources(
                         .map_err(|error| error.to_string())?
                     {
                         if !dry_run {
-                            write_vendor(root, &lock.vendor_path, &vendor)?;
+                            pending_vendor.push((lock.vendor_path.clone(), vendor));
                         }
                         entries.retain(|entry| {
                             !(entry.kind == ContentKind::Mcp && entry.id == item.0.id)
@@ -644,6 +645,9 @@ fn update_resources(
                 }
             }
             if !dry_run {
+                for (vendor_path, vendor) in pending_vendor {
+                    write_vendor(root, &vendor_path, &vendor)?;
+                }
                 let lock =
                     LockFile::new(format!("agentforge {}", env!("CARGO_PKG_VERSION")), entries)
                         .map_err(|error| error.to_string())?;
