@@ -13,7 +13,9 @@ use agentforge_core::{
     resolver::{Capability, CapabilityResolution, RendererDescriptor, resolve_capabilities},
     validation::SpecValidator,
 };
-use agentforge_sources::{ContentKind, LockEntry, LockFile, VendorLimits, verify_vendor_offline};
+use agentforge_sources::{
+    ContentKind, LockEntry, LockFile, SourceType, VendorLimits, verify_vendor_offline,
+};
 use agentforge_targets::{
     ClaudeRenderer, CodexRenderer, CopilotRenderer, GenericRenderer, ManualAction, RenderError,
     RenderRequest, Renderer, ResolvedFile, ResolvedInstruction, ResolvedMcp, ResolvedSkill,
@@ -57,6 +59,13 @@ pub enum CompileError {
     UnsupportedLockVersion(String),
     #[error("lock file contains duplicate entries: {0:?}/{1}")]
     DuplicateLockEntry(ContentKind, String),
+    #[error("lock source type mismatch for {kind:?}/{id}: expected {expected:?}, found {actual:?}")]
+    LockSourceTypeMismatch {
+        kind: ContentKind,
+        id: String,
+        expected: SourceType,
+        actual: SourceType,
+    },
     #[error("manifest is invalid: {0}")]
     InvalidManifest(serde_json::Error),
     #[error("vendor verification failed: {0}")]
@@ -114,6 +123,7 @@ impl ProjectCompiler {
                 other => CompileError::Vendor(other),
             })?
         };
+        validate_lock_sources(&spec, &lock)?;
         verify_vendor_offline(&self.root, &lock, VendorLimits::default())?;
         let previous = read_optional(&self.root.join(MANIFEST_PATH))?
             .map(|bytes| serde_json::from_slice(&bytes).map_err(CompileError::InvalidManifest))
@@ -306,6 +316,53 @@ impl ProjectCompiler {
             }
         }
     }
+}
+
+fn validate_lock_sources(spec: &ProjectSpec, lock: &LockFile) -> Result<(), CompileError> {
+    let mut sources = Vec::new();
+    sources.extend(
+        spec.instructions
+            .iter()
+            .map(|item| (ContentKind::Instruction, &item.id, &item.source)),
+    );
+    sources.extend(
+        spec.skills
+            .iter()
+            .map(|item| (ContentKind::Skill, &item.id, &item.source)),
+    );
+    sources.extend(
+        spec.subagents
+            .iter()
+            .map(|item| (ContentKind::Subagent, &item.id, &item.instructions)),
+    );
+    sources.extend(spec.mcp.iter().filter_map(|item| {
+        item.source
+            .as_ref()
+            .map(|source| (ContentKind::Mcp, &item.id, source))
+    }));
+    for (kind, id, source) in sources {
+        let expected = match source {
+            Source::Local { .. } => continue,
+            Source::Url { .. } => SourceType::Url,
+            Source::Git { .. } => SourceType::Git,
+            Source::SkillsSh { .. } => SourceType::SkillsSh,
+            Source::McpRegistry { .. } => SourceType::McpRegistry,
+        };
+        if let Some(entry) = lock
+            .sources
+            .iter()
+            .find(|entry| entry.kind == kind && entry.id == *id)
+            && entry.source_type != expected
+        {
+            return Err(CompileError::LockSourceTypeMismatch {
+                kind,
+                id: id.clone(),
+                expected,
+                actual: entry.source_type,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn renderer(target: Target) -> Box<dyn Renderer> {
