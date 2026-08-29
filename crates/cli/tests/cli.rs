@@ -629,6 +629,18 @@ fn resource_remove_rejects_unknown_id_without_writing() {
 }
 
 #[test]
+fn target_add_rejects_invalid_value_as_usage_error() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path());
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["target", "add", "unknown-agent"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("invalid target 'unknown-agent'"));
+}
+
+#[test]
 fn resource_dry_run_uses_plan_and_restores_canonical_spec() {
     let root = tempfile::tempdir().unwrap();
     setup(root.path());

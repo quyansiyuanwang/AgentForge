@@ -1198,7 +1198,12 @@ fn mutate_spec(
         ("target", "add") => {
             let target =
                 serde_yaml::from_str::<agentforge_core::model::Target>(&format!("{value}\n"))
-                    .map_err(internal)?;
+                    .map_err(|_| CliFailure {
+                        message: format!(
+                            "invalid target '{value}'; expected generic, codex, claude, or copilot"
+                        ),
+                        exit: 2,
+                    })?;
             if !spec.targets.contains(&target) {
                 spec.targets.push(target);
             }
