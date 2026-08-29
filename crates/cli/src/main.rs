@@ -406,12 +406,35 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
     });
     checks.push(json!({"check":"manifest","path":manifest_path,"healthy":manifest.is_some()}));
     if let Some(manifest) = &manifest {
+        let expected = compilation
+            .descriptors
+            .iter()
+            .map(|descriptor| (descriptor.target, descriptor.renderer_version.clone()))
+            .collect::<std::collections::BTreeMap<_, _>>();
         let renderers = manifest
             .artifacts
             .iter()
             .map(|artifact| json!({"target":artifact.target,"version":artifact.renderer_version}))
             .collect::<Vec<_>>();
-        checks.push(json!({"check":"rendererVersion","healthy":!renderers.is_empty(),"renderers":renderers}));
+        let mismatches = manifest
+            .artifacts
+            .iter()
+            .filter_map(|artifact| {
+                expected
+                    .get(&artifact.target)
+                    .filter(|version| version.as_str() != artifact.renderer_version)
+                    .map(|version| {
+                        json!({"target":artifact.target,"expected":version,"actual":artifact.renderer_version})
+                    })
+            })
+            .collect::<Vec<_>>();
+        checks.push(json!({"check":"rendererVersion","healthy":!renderers.is_empty() && mismatches.is_empty(),"renderers":renderers,"mismatches":mismatches}));
+        if !mismatches.is_empty() {
+            compilation.diagnostics.push(Diagnostic::warning(
+                DiagnosticCode::UnsupportedCapability,
+                "manifest renderer version differs from the installed AgentForge renderer",
+            ));
+        }
     }
     checks.push(json!({"check":"artifactDrift","healthy":!compilation.plan.has_conflicts(),"changes":changes_json(&compilation)}));
     checks.push(json!({

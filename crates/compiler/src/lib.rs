@@ -10,7 +10,7 @@ use agentforge_core::{
     Diagnostic,
     model::{Content, Mcp, ProjectSpec, Source, Target, Transport},
     planning::{Manifest, ResolvedPlan, build_plan, content_hash},
-    resolver::{Capability, CapabilityResolution, resolve_capabilities},
+    resolver::{Capability, CapabilityResolution, RendererDescriptor, resolve_capabilities},
     validation::SpecValidator,
 };
 use agentforge_sources::{ContentKind, LockEntry, LockFile, VendorLimits, verify_vendor_offline};
@@ -30,6 +30,7 @@ pub struct Compilation {
     pub spec: ProjectSpec,
     pub plan: ResolvedPlan,
     pub capabilities: CapabilityResolution,
+    pub descriptors: Vec<RendererDescriptor>,
     pub manual_actions: Vec<ManualAction>,
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -134,6 +135,7 @@ impl ProjectCompiler {
             spec,
             plan,
             capabilities,
+            descriptors,
             manual_actions,
             diagnostics,
         })
