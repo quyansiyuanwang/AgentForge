@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-2025
+            target: x86_64-pc-windows-msvc
+            exe: agentforge.exe
+          - name: linux-x64
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            exe: agentforge
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            exe: agentforge
+          - name: macos-x64
+            os: macos-13
+            target: x86_64-apple-darwin
+            exe: agentforge
+          - name: macos-arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+            exe: agentforge
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked --release --package agentforge-cli --target ${{ matrix.target }}
+      - name: Smoke test
+        shell: bash
+        run: |
+          "target/${{ matrix.target }}/release/${{ matrix.exe }}" --version
+          test -x "target/${{ matrix.target }}/release/${{ matrix.exe }}" || true
+      - name: Archive Unix
+        if: runner.os != 'Windows'
+        run: tar -czf agentforge-${{ matrix.name }}.tar.gz -C target/${{ matrix.target }}/release ${{ matrix.exe }}
+      - name: Archive Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "target/${{ matrix.target }}/release/${{ matrix.exe }}" -DestinationPath "agentforge-${{ matrix.name }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentforge-${{ matrix.name }}
+          path: agentforge-${{ matrix.name }}.*
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
