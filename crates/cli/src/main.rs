@@ -745,16 +745,18 @@ fn update_resources(
                             (
                                 PathBuf::from(format!("{vendor_path}/{}", file.path)),
                                 file.content,
+                                file.mode,
                             )
                         })
                     })
                     .chain(std::iter::once((
                         PathBuf::from(".agentforge/lock.yaml"),
                         yaml.into_bytes(),
+                        0o644,
                     )))
                     .collect::<Vec<_>>();
                 ApplicationService::new(root)
-                    .apply_control_files(&files)
+                    .apply_control_files_with_modes(&files)
                     .map_err(|error| error.to_string())?;
             }
             Ok::<_, String>(changed)
@@ -1129,9 +1131,50 @@ fn cli_source(value: &str) -> agentforge_core::model::Source {
             url: value.into(),
             sha256: None,
         }
+    } else if let Some(reference) = value.strip_prefix("github:") {
+        let (reference, rev) = split_ref_version(reference);
+        let mut parts = reference.split('/');
+        let owner = parts.next().unwrap_or_default();
+        let repository = parts.next().unwrap_or_default();
+        let subpath = parts.collect::<Vec<_>>().join("/");
+        if owner.is_empty() || repository.is_empty() {
+            return agentforge_core::model::Source::Local { path: value.into() };
+        }
+        agentforge_core::model::Source::Git {
+            repository: format!("https://github.com/{owner}/{repository}.git"),
+            rev: rev.unwrap_or("HEAD").into(),
+            subpath: (!subpath.is_empty()).then_some(subpath),
+        }
+    } else if let Some(reference) = value
+        .strip_prefix("skills:")
+        .or_else(|| value.strip_prefix("skills.sh:"))
+    {
+        let (reference, version) = split_ref_version(reference);
+        agentforge_core::model::Source::SkillsSh {
+            r#ref: reference.into(),
+            version: version.map(str::to_owned),
+        }
+    } else if let Some(reference) = value.strip_prefix("registry:") {
+        let (reference, version) = split_ref_version(reference);
+        agentforge_core::model::Source::McpRegistry {
+            r#ref: reference.into(),
+            version: version.map(str::to_owned),
+        }
     } else {
         agentforge_core::model::Source::Local { path: value.into() }
     }
+}
+
+fn split_ref_version(value: &str) -> (&str, Option<&str>) {
+    value
+        .rsplit_once('@')
+        .map_or((value, None), |(reference, version)| {
+            if reference.is_empty() || version.is_empty() {
+                (value, None)
+            } else {
+                (reference, Some(version))
+            }
+        })
 }
 
 fn compile(root: &Path) -> Result<Compilation, CliFailure> {
@@ -1313,7 +1356,8 @@ fn internal(error: impl std::fmt::Display) -> CliFailure {
 
 #[cfg(test)]
 mod tests {
-    use super::redact_text;
+    use super::{cli_source, redact_text};
+    use agentforge_core::model::Source;
 
     #[test]
     fn sensitive_diff_lines_are_redacted() {
@@ -1321,5 +1365,31 @@ mod tests {
         assert!(!output.contains("do-not-print"));
         assert!(output.contains("[REDACTED SENSITIVE LINE]"));
         assert!(output.contains("command: safe"));
+    }
+
+    #[test]
+    fn cli_source_parses_documented_remote_shorthands() {
+        assert_eq!(
+            cli_source("github:acme/agents/security-review@v2.0.0"),
+            Source::Git {
+                repository: "https://github.com/acme/agents.git".into(),
+                rev: "v2.0.0".into(),
+                subpath: Some("security-review".into()),
+            }
+        );
+        assert_eq!(
+            cli_source("skills:acme/agents/testing@1.2.0"),
+            Source::SkillsSh {
+                r#ref: "acme/agents/testing".into(),
+                version: Some("1.2.0".into()),
+            }
+        );
+        assert_eq!(
+            cli_source("registry:io.github.example/server@1.4.0"),
+            Source::McpRegistry {
+                r#ref: "io.github.example/server".into(),
+                version: Some("1.4.0".into()),
+            }
+        );
     }
 }

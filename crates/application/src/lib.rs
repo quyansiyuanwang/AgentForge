@@ -179,8 +179,20 @@ impl<V: ApplyValidator, F: FaultInjector> ApplicationService<V, F> {
 
     /// Atomically writes non-generated control files such as ProjectSpec and lock metadata.
     pub fn apply_control_files(&self, files: &[(PathBuf, Vec<u8>)]) -> Result<(), ApplyError> {
+        let with_modes = files
+            .iter()
+            .map(|(path, bytes)| (path.clone(), bytes.clone(), 0o644))
+            .collect::<Vec<_>>();
+        self.apply_control_files_with_modes(&with_modes)
+    }
+
+    /// Atomically writes control files while preserving normalized vendor modes.
+    pub fn apply_control_files_with_modes(
+        &self,
+        files: &[(PathBuf, Vec<u8>, u32)],
+    ) -> Result<(), ApplyError> {
         let mut seen = std::collections::BTreeSet::new();
-        for (relative, _) in files {
+        for (relative, _, _) in files {
             let key = relative
                 .to_string_lossy()
                 .replace('\\', "/")
@@ -198,7 +210,7 @@ impl<V: ApplyValidator, F: FaultInjector> ApplicationService<V, F> {
         let mut backups = Vec::new();
         let mut installed = Vec::new();
         let result = (|| {
-            for (relative, bytes) in files {
+            for (relative, bytes, mode) in files {
                 let relative_text = relative.to_string_lossy().replace('\\', "/");
                 validate_relative(&relative_text)?;
                 validate_repository_path(&self.root, &relative_text)?;
@@ -217,7 +229,8 @@ impl<V: ApplyValidator, F: FaultInjector> ApplicationService<V, F> {
                     fs::create_dir_all(parent).map_err(|source| io_error(parent, source))?;
                 }
                 fs::rename(&staged, &target).map_err(|source| io_error(&target, source))?;
-                installed.push(target);
+                installed.push(target.clone());
+                set_mode(&target, *mode).map_err(|source| io_error(&target, source))?;
             }
             Ok::<(), ApplyError>(())
         })();
@@ -658,6 +671,19 @@ fn write_synced(path: &Path, bytes: &[u8]) -> Result<(), ApplyError> {
     file.write_all(bytes)
         .map_err(|source| io_error(path, source))?;
     file.sync_all().map_err(|source| io_error(path, source))
+}
+
+fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(mode))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, mode);
+        Ok(())
+    }
 }
 #[cfg(unix)]
 fn sync_parent(path: &Path) -> Result<(), ApplyError> {

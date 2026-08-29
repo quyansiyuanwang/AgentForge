@@ -270,3 +270,25 @@ fn control_files_replace_atomically_and_restore_on_invalid_path() {
     ]);
     assert!(matches!(duplicate, Err(ApplyError::UnsafePath(_))));
 }
+
+#[test]
+fn control_files_with_modes_preserve_vendor_executable_bits() {
+    let root = tempfile::tempdir().unwrap();
+    let service = ApplicationService::new(root.path());
+    service
+        .apply_control_files_with_modes(&[(
+            PathBuf::from(".agentforge/vendor/skills/demo/run.sh"),
+            b"#!/bin/sh\n".to_vec(),
+            0o755,
+        )])
+        .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(root.path().join(".agentforge/vendor/skills/demo/run.sh"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o755);
+    }
+}
