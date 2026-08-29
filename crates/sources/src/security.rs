@@ -159,6 +159,7 @@ fn normalize_path(value: &str) -> Result<String, SourceError> {
     }
     let replaced = value.replace('\\', "/");
     if replaced.starts_with('/')
+        || has_windows_drive_prefix(&replaced)
         || replaced
             .split('/')
             .any(|part| part.is_empty() || part == "." || part == ".." || reserved(part))
@@ -174,6 +175,11 @@ fn normalize_path(value: &str) -> Result<String, SourceError> {
         return Err(SourceError::UnsafePath(value.into()));
     }
     Ok(replaced)
+}
+
+fn has_windows_drive_prefix(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
 fn reserved(component: &str) -> bool {
