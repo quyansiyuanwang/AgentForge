@@ -179,6 +179,19 @@ fn lock_schema_and_entries_are_validated_before_rendering() {
 
     fs::write(
         &lock_path,
+        "schemaVersion: '1'\ngeneratedBy: unknown\nsources: []\n",
+    )
+    .unwrap();
+    let error = ProjectCompiler::new(repository.path())
+        .compile()
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        agentforge_compiler::CompileError::InvalidLockGenerator(generator) if generator == "unknown"
+    ));
+
+    fs::write(
+        &lock_path,
         "schemaVersion: '1'\ngeneratedBy: agentforge 0.1.0\nsources:\n  - kind: skill\n    id: testing\n    sourceType: git\n    requestedLocator: x\n    resolvedLocator: y\n    vendorPath: .agentforge/vendor/skills/testing\n    sha256: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n    executableContent: false\n    fileCount: 0\n    totalBytes: 0\n  - kind: skill\n    id: testing\n    sourceType: git\n    requestedLocator: x\n    resolvedLocator: y\n    vendorPath: .agentforge/vendor/skills/testing\n    sha256: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n    executableContent: false\n    fileCount: 0\n    totalBytes: 0\n",
     )
     .unwrap();

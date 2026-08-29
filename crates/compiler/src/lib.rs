@@ -57,6 +57,8 @@ pub enum CompileError {
     InvalidLock(serde_yaml::Error),
     #[error("lock file schema version is unsupported: {0}")]
     UnsupportedLockVersion(String),
+    #[error("lock file generatedBy is invalid: {0}")]
+    InvalidLockGenerator(String),
     #[error("lock file contains duplicate entries: {0:?}/{1}")]
     DuplicateLockEntry(ContentKind, String),
     #[error("lock source type mismatch for {kind:?}/{id}: expected {expected:?}, found {actual:?}")]
@@ -115,6 +117,9 @@ impl ProjectCompiler {
                 .map_err(CompileError::InvalidLock)?;
             if parsed.schema_version != "1" {
                 return Err(CompileError::UnsupportedLockVersion(parsed.schema_version));
+            }
+            if !valid_lock_generator(&parsed.generated_by) {
+                return Err(CompileError::InvalidLockGenerator(parsed.generated_by));
             }
             LockFile::new(parsed.generated_by, parsed.sources).map_err(|error| match error {
                 agentforge_sources::SourceError::DuplicateLockEntry { kind, id } => {
@@ -316,6 +321,20 @@ impl ProjectCompiler {
             }
         }
     }
+}
+
+fn valid_lock_generator(value: &str) -> bool {
+    let Some(version) = value.strip_prefix("agentforge ") else {
+        return false;
+    };
+    let mut parts = version.split('.');
+    let (Some(major), Some(minor), Some(patch)) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    parts.next().is_none()
+        && [major, minor, patch]
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 fn validate_lock_sources(spec: &ProjectSpec, lock: &LockFile) -> Result<(), CompileError> {

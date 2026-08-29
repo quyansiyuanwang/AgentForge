@@ -1947,6 +1947,7 @@ fn compile(root: &Path) -> Result<Compilation, CliFailure> {
             | CompileError::MissingLock { .. }
             | CompileError::InvalidLock(_)
             | CompileError::UnsupportedLockVersion(_)
+            | CompileError::InvalidLockGenerator(_)
             | CompileError::DuplicateLockEntry(..)
             | CompileError::LockSourceTypeMismatch { .. }
             | CompileError::InvalidManifest(_)
