@@ -584,6 +584,18 @@ fn remote_update_dry_run_exposes_pinned_source_inventory() {
 }
 
 #[test]
+fn remote_update_rejects_unknown_selected_resource() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path());
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["skill", "update", "missing", "--dry-run"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("skill 'missing' does not exist"));
+}
+
+#[test]
 fn resource_remove_edits_canonical_spec_without_vendor_access() {
     let root = tempfile::tempdir().unwrap();
     setup(root.path());

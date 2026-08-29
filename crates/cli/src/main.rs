@@ -747,6 +747,19 @@ fn update_resources(
             message: "ProjectSpec is invalid".into(),
             exit: 1,
         })?;
+    if let Some(selected) = selected {
+        let exists = match kind {
+            "skill" => spec.skills.iter().any(|item| item.id == selected),
+            "mcp" => spec.mcp.iter().any(|item| item.id == selected),
+            _ => false,
+        };
+        if !exists {
+            return Err(CliFailure {
+                message: format!("{kind} '{selected}' does not exist in project spec"),
+                exit: 1,
+            });
+        }
+    }
     let lock_path = root.join(".agentforge/lock.yaml");
     let previous_lock = std::fs::read(&lock_path).ok();
     let existing = previous_lock
