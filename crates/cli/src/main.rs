@@ -994,20 +994,34 @@ fn mutate_spec(
         "beforeCount": resource_count(current, kind),
         "afterCount": resource_count(&spec, kind),
     });
-    if !dry_run {
-        ApplicationService::new(root)
-            .apply_control_files(&[(
-                PathBuf::from(".agentforge/project.yaml"),
-                rendered.into_bytes(),
-            )])
-            .map_err(runtime)?;
-        let compilation = match compile(root) {
-            Ok(compilation) => compilation,
-            Err(error) => {
-                restore_spec(root, &previous_rendered);
-                return Err(error);
-            }
-        };
+    ApplicationService::new(root)
+        .apply_control_files(&[(
+            PathBuf::from(".agentforge/project.yaml"),
+            rendered.into_bytes(),
+        )])
+        .map_err(runtime)?;
+    let compilation = match compile(root) {
+        Ok(compilation) => compilation,
+        Err(error) => {
+            restore_spec(root, &previous_rendered);
+            return Err(error);
+        }
+    };
+    if dry_run {
+        let changes = changes_json(&compilation);
+        let preview = human_diff(&compilation);
+        let blocked = compilation.blocks_apply(false);
+        restore_spec(root, &previous_rendered);
+        return Ok(outcome_value(
+            &format!("{kind} {operation}"),
+            json!({"path":path,"dryRun":true,"changed":compilation.plan.has_changes(),"summary":summary,"changes":changes}),
+            compilation.diagnostics,
+            preview,
+            json_output,
+            blocked,
+        ));
+    }
+    {
         if compilation.blocks_apply(false) {
             let changes = changes_json(&compilation);
             let preview = human_diff(&compilation);

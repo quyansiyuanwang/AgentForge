@@ -558,3 +558,25 @@ fn resource_remove_edits_canonical_spec_without_vendor_access() {
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("AF1103"));
 }
+
+#[test]
+fn resource_dry_run_uses_plan_and_restores_canonical_spec() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path());
+    let spec_path = root.path().join(".agentforge/project.yaml");
+    let before = fs::read(&spec_path).unwrap();
+    let output = cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["mcp", "remove", "github", "--dry-run", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read(&spec_path).unwrap(), before);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["data"]["dryRun"], true);
+    assert!(value["data"]["changes"].is_array());
+}
