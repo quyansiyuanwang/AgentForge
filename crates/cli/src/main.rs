@@ -1203,6 +1203,8 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         .collect::<Vec<_>>();
     let lock_path = root.join(".agentforge/lock.yaml");
     let previous_lock = std::fs::read(&lock_path).ok();
+    let context_file = root.join(&context_path);
+    let previous_context = std::fs::read(&context_file).ok();
     let vendor_root = root.join(".agentforge/vendor");
     let previous_vendor = vendor_root.exists();
     if !args.dry_run {
@@ -1237,7 +1239,12 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 args.allow_unpinned_source,
                 args.allow_executable_content,
             ) {
-                rollback_init_files(&root, previous_lock.as_deref(), previous_vendor);
+                rollback_init_files(
+                    &root,
+                    previous_lock.as_deref(),
+                    previous_vendor,
+                    previous_context.as_deref(),
+                );
                 return Err(error);
             }
         }
@@ -1255,7 +1262,12 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 args.allow_unpinned_source,
                 args.allow_executable_content,
             ) {
-                rollback_init_files(&root, previous_lock.as_deref(), previous_vendor);
+                rollback_init_files(
+                    &root,
+                    previous_lock.as_deref(),
+                    previous_vendor,
+                    previous_context.as_deref(),
+                );
                 return Err(error);
             }
         }
@@ -1273,7 +1285,12 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         let compilation = match compile(&root) {
             Ok(compilation) => compilation,
             Err(error) => {
-                rollback_init_files(&root, previous_lock.as_deref(), previous_vendor);
+                rollback_init_files(
+                    &root,
+                    previous_lock.as_deref(),
+                    previous_vendor,
+                    previous_context.as_deref(),
+                );
                 return Err(error);
             }
         };
@@ -1281,7 +1298,12 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
             let changes = changes_json(&compilation);
             let preview = human_diff(&compilation);
             let diagnostics = compilation.diagnostics.clone();
-            rollback_init_files(&root, previous_lock.as_deref(), previous_vendor);
+            rollback_init_files(
+                &root,
+                previous_lock.as_deref(),
+                previous_vendor,
+                previous_context.as_deref(),
+            );
             return Ok(outcome_value(
                 "init",
                 json!({"path":path,"dryRun":false,"spec":spec,"facts":report.profile,"evidence":report.profile.evidence,"changes":changes}),
@@ -1299,7 +1321,12 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                     exit: 3,
                 })
             {
-                rollback_init_files(&root, previous_lock.as_deref(), previous_vendor);
+                rollback_init_files(
+                    &root,
+                    previous_lock.as_deref(),
+                    previous_vendor,
+                    previous_context.as_deref(),
+                );
                 return Err(error);
             }
             format!("Initialized project\n{}", human_diff(&compilation))
@@ -1397,12 +1424,24 @@ fn cli_source(value: &str) -> agentforge_core::model::Source {
     }
 }
 
-fn rollback_init_files(root: &Path, previous_lock: Option<&[u8]>, previous_vendor: bool) {
+fn rollback_init_files(
+    root: &Path,
+    previous_lock: Option<&[u8]>,
+    previous_vendor: bool,
+    previous_context: Option<&[u8]>,
+) {
     let project = root.join(".agentforge/project.yaml");
     let lock = root.join(".agentforge/lock.yaml");
     let context = root.join(".agentforge/project-context.md");
     let _ = std::fs::remove_file(project);
-    let _ = std::fs::remove_file(context);
+    match previous_context {
+        Some(bytes) => {
+            let _ = std::fs::write(&context, bytes);
+        }
+        None => {
+            let _ = std::fs::remove_file(&context);
+        }
+    }
     match previous_lock {
         Some(bytes) => {
             let _ = std::fs::write(lock, bytes);

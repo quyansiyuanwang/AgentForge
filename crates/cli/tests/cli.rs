@@ -276,6 +276,11 @@ fn init_non_interactive_requires_explicit_target() {
 #[test]
 fn init_validation_failure_does_not_leave_control_files() {
     let root = tempfile::tempdir().unwrap();
+    write(
+        root.path(),
+        ".agentforge/project-context.md",
+        "keep this context\n",
+    );
     let output = cargo_bin_cmd!("agentforge")
         .current_dir(root.path())
         .args([
@@ -291,6 +296,10 @@ fn init_validation_failure_does_not_leave_control_files() {
     assert!(!output.status.success());
     assert!(!root.path().join(".agentforge/project.yaml").exists());
     assert!(!root.path().join(".agentforge/lock.yaml").exists());
+    assert_eq!(
+        fs::read_to_string(root.path().join(".agentforge/project-context.md")).unwrap(),
+        "keep this context\n"
+    );
 }
 
 #[test]
