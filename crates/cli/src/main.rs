@@ -737,6 +737,10 @@ fn write_vendor_batch(
         std::fs::remove_dir_all(&batch).map_err(|error| error.to_string())?;
     }
     std::fs::create_dir_all(&batch).map_err(|error| error.to_string())?;
+    let mut cleanup = BatchCleanup {
+        path: batch.clone(),
+        keep: false,
+    };
     let mut staged = Vec::new();
     for (index, (vendor_path, vendor)) in vendors.iter().enumerate() {
         let stage = batch.join(index.to_string());
@@ -774,8 +778,22 @@ fn write_vendor_batch(
     for (_, backup) in backups {
         let _ = std::fs::remove_dir_all(backup);
     }
+    cleanup.keep = true;
     let _ = std::fs::remove_dir_all(batch);
     Ok(())
+}
+
+struct BatchCleanup {
+    path: PathBuf,
+    keep: bool,
+}
+
+impl Drop for BatchCleanup {
+    fn drop(&mut self) {
+        if !self.keep && self.path.exists() {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
 }
 
 fn rollback_vendor_batch(committed: &[PathBuf], backups: &[(PathBuf, PathBuf)]) {
