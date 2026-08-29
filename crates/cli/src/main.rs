@@ -404,7 +404,17 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
     let manifest = std::fs::read(&manifest_path).ok().and_then(|bytes| {
         serde_json::from_slice::<agentforge_core::planning::Manifest>(&bytes).ok()
     });
-    checks.push(json!({"check":"manifest","path":manifest_path,"healthy":manifest.is_some()}));
+    let manifest_healthy = manifest.is_some();
+    checks.push(json!({"check":"manifest","path":manifest_path,"healthy":manifest_healthy}));
+    if !manifest_healthy {
+        compilation.diagnostics.push(
+            Diagnostic::warning(
+                DiagnosticCode::UnknownReference,
+                "manifest.json is missing or invalid; run sync to regenerate managed state",
+            )
+            .with_remediation("run agentforge sync after reviewing the planned changes"),
+        );
+    }
     if let Some(manifest) = &manifest {
         let expected = compilation
             .descriptors
@@ -435,6 +445,14 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
                 "manifest renderer version differs from the installed AgentForge renderer",
             ));
         }
+    } else {
+        checks.push(json!({
+            "check":"rendererVersion",
+            "healthy":false,
+            "verified":false,
+            "renderers":[],
+            "mismatches":[]
+        }));
     }
     checks.push(json!({"check":"artifactDrift","healthy":!compilation.plan.has_conflicts(),"changes":changes_json(&compilation)}));
     checks.push(json!({
