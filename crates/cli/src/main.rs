@@ -412,6 +412,10 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
         "healthy":!compilation.capabilities.blocks_apply(false),
         "decisions":compilation.capabilities.decisions
     }));
+    checks.push(json!({
+        "check": "mcpSecurity",
+        "servers": mcp_security_summary(&compilation.spec)
+    }));
     for variable in compilation
         .spec
         .mcp
@@ -1417,7 +1421,63 @@ fn human_diff(compilation: &Compilation) -> String {
             action.summary
         ));
     }
+    for server in mcp_security_summary(&compilation.spec) {
+        output.push_str(&format!(
+            "MCP {}: {}\n",
+            server["id"].as_str().unwrap_or("unknown"),
+            server["transport"].as_str().unwrap_or("unknown")
+        ));
+    }
     output.trim_end().into()
+}
+
+fn mcp_security_summary(spec: &agentforge_core::model::ProjectSpec) -> Vec<Value> {
+    use agentforge_core::model::Transport;
+    spec.mcp
+        .iter()
+        .map(|server| {
+            let (transport, endpoint) = match server.transport.as_ref() {
+                Some(Transport::Stdio { command, .. }) => {
+                    (format!("stdio command={}", redact_inline(command)), None)
+                }
+                Some(Transport::StreamableHttp { url, .. }) => {
+                    ("streamable-http".into(), Some(redact_url(url)))
+                }
+                Some(Transport::Sse { url, .. }) => ("sse".into(), Some(redact_url(url))),
+                None => ("resolved-source".into(), None),
+            };
+            let env = server.env.to_vec();
+            let mut value = json!({
+                "id": server.id,
+                "transport": transport,
+                "environment": env,
+                "networkPermission": format!("{:?}", spec.settings.permissions.network)
+            });
+            if let Some(endpoint) = endpoint {
+                value["endpoint"] = Value::String(endpoint);
+            }
+            value
+        })
+        .collect()
+}
+
+fn redact_inline(value: &str) -> String {
+    if value.chars().count() > 256 {
+        format!("{}...", value.chars().take(256).collect::<String>())
+    } else {
+        value.to_owned()
+    }
+}
+
+fn redact_url(value: &str) -> String {
+    url::Url::parse(value)
+        .map(|mut url| {
+            let _ = url.set_username("");
+            let _ = url.set_password(None);
+            url.set_query(None);
+            url.to_string()
+        })
+        .unwrap_or_else(|_| "[invalid URL]".into())
 }
 fn text_diff(change: &ArtifactChange) -> String {
     let before = change
