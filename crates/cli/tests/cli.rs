@@ -195,3 +195,18 @@ fn init_non_interactive_requires_explicit_target() {
         .assert()
         .code(2);
 }
+
+#[test]
+fn sync_json_returns_envelope() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path());
+    let output = cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["sync", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "sync");
+    assert_eq!(value["schemaVersion"], "1");
+}
