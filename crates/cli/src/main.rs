@@ -151,6 +151,8 @@ enum ResourceCommand {
         #[arg(long)]
         json: bool,
         #[arg(long)]
+        strict: bool,
+        #[arg(long)]
         allow_unpinned_source: bool,
         #[arg(long)]
         allow_executable_content: bool,
@@ -161,6 +163,7 @@ enum ResourceCommand {
 struct UpdateOptions {
     dry_run: bool,
     json_output: bool,
+    strict: bool,
     allow_unpinned: bool,
     allow_executable_content: bool,
     apply_targets: bool,
@@ -610,6 +613,7 @@ fn resources(root: &Path, kind: &str, command: ResourceCommand) -> Result<Outcom
         id,
         dry_run,
         json,
+        strict,
         allow_unpinned_source,
         allow_executable_content,
     } = &command
@@ -621,6 +625,7 @@ fn resources(root: &Path, kind: &str, command: ResourceCommand) -> Result<Outcom
             UpdateOptions {
                 dry_run: *dry_run,
                 json_output: *json,
+                strict: *strict,
                 allow_unpinned: *allow_unpinned_source,
                 allow_executable_content: *allow_executable_content,
                 apply_targets: true,
@@ -720,6 +725,7 @@ fn update_resources(
     let UpdateOptions {
         dry_run,
         json_output,
+        strict,
         allow_unpinned,
         allow_executable_content,
         apply_targets,
@@ -917,7 +923,7 @@ fn update_resources(
             }
         };
         generated_changes = changes_json(&compilation);
-        if compilation.blocks_apply(false) {
+        if compilation.blocks_apply(strict) {
             let preview = human_diff(&compilation);
             restore_update_state(root, &lock_path, previous_lock.as_deref(), &vendor_backup);
             return Ok(outcome_value(
@@ -1539,6 +1545,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 UpdateOptions {
                     dry_run: false,
                     json_output: args.json,
+                    strict: false,
                     allow_unpinned: args.allow_unpinned_source,
                     allow_executable_content: args.allow_executable_content,
                     apply_targets: false,
@@ -1568,6 +1575,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                 UpdateOptions {
                     dry_run: false,
                     json_output: args.json,
+                    strict: false,
                     allow_unpinned: args.allow_unpinned_source,
                     allow_executable_content: args.allow_executable_content,
                     apply_targets: false,
