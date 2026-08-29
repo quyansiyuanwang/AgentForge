@@ -619,3 +619,53 @@ fn read_current<'a>(
     }
     Ok(current)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lock_source_type_must_match_project_spec() {
+        let spec = SpecValidator::new()
+            .validate_yaml(
+                r#"schemaVersion: "1"
+project: { name: fixture }
+targets: [generic]
+skills:
+  - id: remote
+    source: { type: url, url: https://example.com/skill.md }
+"#,
+            )
+            .spec
+            .unwrap();
+        let entry = LockEntry {
+            kind: ContentKind::Skill,
+            id: "remote".into(),
+            source_type: SourceType::Git,
+            requested_locator: "https://example.com/skill.md".into(),
+            resolved_locator: "https://example.com/skill.md".into(),
+            resolved_version: None,
+            git_commit: None,
+            tree_hash: None,
+            etag: None,
+            last_modified: None,
+            vendor_path: ".agentforge/vendor/skills/remote".into(),
+            sha256: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                .into(),
+            executable_content: false,
+            file_count: 1,
+            total_bytes: 1,
+        };
+        let lock = LockFile::new("agentforge 0.1.0", vec![entry]).unwrap();
+        let error = validate_lock_sources(&spec, &lock).unwrap_err();
+        assert!(matches!(
+            error,
+            CompileError::LockSourceTypeMismatch {
+                kind: ContentKind::Skill,
+                id,
+                expected: SourceType::Url,
+                actual: SourceType::Git,
+            } if id == "remote"
+        ));
+    }
+}
