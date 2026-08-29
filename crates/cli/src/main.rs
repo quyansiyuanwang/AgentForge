@@ -942,7 +942,7 @@ fn update_resources(
                     previous_lock.as_deref(),
                     previous_vendor,
                     &vendor_backup,
-                );
+                )?;
             }
             return Err(error);
         }
@@ -959,7 +959,7 @@ fn update_resources(
                     previous_lock.as_deref(),
                     previous_vendor,
                     &vendor_backup,
-                );
+                )?;
                 return Err(error);
             }
         };
@@ -972,7 +972,7 @@ fn update_resources(
                 previous_lock.as_deref(),
                 previous_vendor,
                 &vendor_backup,
-            );
+            )?;
             return Ok(outcome_value(
                 &format!("{kind} update"),
                 json!({"updated":updated,"dryRun":false,"changes":changes_json(&compilation)}),
@@ -983,21 +983,16 @@ fn update_resources(
             ));
         }
         if compilation.plan.has_changes() {
-            ApplicationService::new(root)
-                .apply(&compilation.plan)
-                .map_err(|error| {
-                    restore_update_state(
-                        root,
-                        &lock_path,
-                        previous_lock.as_deref(),
-                        previous_vendor,
-                        &vendor_backup,
-                    );
-                    CliFailure {
-                        message: error.to_string(),
-                        exit: 3,
-                    }
-                })?;
+            if let Err(error) = ApplicationService::new(root).apply(&compilation.plan) {
+                restore_update_state(
+                    root,
+                    &lock_path,
+                    previous_lock.as_deref(),
+                    previous_vendor,
+                    &vendor_backup,
+                )?;
+                return Err(runtime(error));
+            }
             generated_preview = human_diff(&compilation);
         }
         if vendor_backup.exists() {
@@ -1340,14 +1335,16 @@ fn restore_update_state(
     previous_lock: Option<&[u8]>,
     previous_vendor: bool,
     vendor_backup: &Path,
-) {
+) -> Result<(), CliFailure> {
     match previous_lock {
         Some(bytes) => {
-            let _ = std::fs::write(lock_path, bytes);
+            std::fs::write(lock_path, bytes).map_err(runtime)?;
         }
-        None => {
-            let _ = std::fs::remove_file(lock_path);
-        }
+        None => match std::fs::remove_file(lock_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(runtime(error)),
+        },
     }
     if vendor_backup.exists() {
         let vendor = root.join(".agentforge/vendor");
@@ -1355,18 +1352,19 @@ fn restore_update_state(
             .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
             .unwrap_or(false)
         {
-            let _ = std::fs::remove_dir_all(&vendor);
+            std::fs::remove_dir_all(&vendor).map_err(runtime)?;
         }
-        let _ = std::fs::rename(vendor_backup, vendor);
+        std::fs::rename(vendor_backup, vendor).map_err(runtime)?;
     } else if !previous_vendor {
         let vendor = root.join(".agentforge/vendor");
         if std::fs::symlink_metadata(&vendor)
             .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
             .unwrap_or(false)
         {
-            let _ = std::fs::remove_dir_all(vendor);
+            std::fs::remove_dir_all(vendor).map_err(runtime)?;
         }
     }
+    Ok(())
 }
 
 fn resource_count(spec: &agentforge_core::model::ProjectSpec, kind: &str) -> usize {
@@ -2180,13 +2178,13 @@ mod tests {
         fs::create_dir_all(&vendor).unwrap();
         fs::write(vendor.join("new.txt"), b"new").unwrap();
         let lock = root.path().join(".agentforge/lock.yaml");
-        restore_update_state(root.path(), &lock, None, true, &backup);
+        restore_update_state(root.path(), &lock, None, true, &backup).unwrap();
         assert!(vendor.join("old.txt").exists());
         assert!(!vendor.join("new.txt").exists());
 
         fs::create_dir_all(&vendor).unwrap();
         fs::write(vendor.join("new.txt"), b"new").unwrap();
-        restore_update_state(root.path(), &lock, None, false, &backup);
+        restore_update_state(root.path(), &lock, None, false, &backup).unwrap();
         assert!(!vendor.exists());
     }
 
