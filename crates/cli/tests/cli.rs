@@ -309,6 +309,29 @@ fn init_dry_run_reports_planned_artifacts_without_writing() {
 }
 
 #[test]
+fn init_dry_run_reports_unmanaged_target_conflicts() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("AGENTS.md"), b"user-owned").unwrap();
+    let output = cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args([
+            "init",
+            "--non-interactive",
+            "--target",
+            "codex",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(!root.path().join(".agentforge/project.yaml").exists());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["status"], "failure");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("AGENTS.md"));
+}
+
+#[test]
 fn init_three_vendor_targets_is_idempotent() {
     let root = tempfile::tempdir().unwrap();
     cargo_bin_cmd!("agentforge")

@@ -1122,6 +1122,14 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
     };
     let rendered = serde_yaml::to_string(&spec).map_err(internal)?;
     let planned_artifacts = planned_artifacts(&target_values);
+    let planned_conflicts = planned_artifacts
+        .iter()
+        .filter(|relative| {
+            root.join(relative.replace('/', std::path::MAIN_SEPARATOR_STR))
+                .exists()
+        })
+        .cloned()
+        .collect::<Vec<_>>();
     let lock_path = root.join(".agentforge/lock.yaml");
     let previous_lock = std::fs::read(&lock_path).ok();
     let vendor_root = root.join(".agentforge/vendor");
@@ -1182,7 +1190,14 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         }
     }
     let mut human = if args.dry_run {
-        "Would initialize project".to_owned()
+        if planned_conflicts.is_empty() {
+            "Would initialize project".to_owned()
+        } else {
+            format!(
+                "Conflicts prevent initialization:\n{}",
+                planned_conflicts.join("\n")
+            )
+        }
     } else {
         let compilation = match compile(&root) {
             Ok(compilation) => compilation,
@@ -1221,13 +1236,26 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
             "Initialized project".to_owned()
         }
     };
-    Ok(outcome(
+    let mut diagnostics = report.diagnostics;
+    if args.dry_run {
+        for conflict in &planned_conflicts {
+            diagnostics.push(
+                Diagnostic::error(
+                    DiagnosticCode::ArtifactConflict,
+                    format!("unmanaged artifact '{conflict}' blocks initialization"),
+                )
+                .at_path(conflict)
+                .with_remediation("move or rename the existing file before running init"),
+            );
+        }
+    }
+    Ok(outcome_value(
         "init",
         json!({"path":path,"dryRun":args.dry_run,"spec":spec,"facts":report.profile,"evidence":report.profile.evidence,"plannedArtifacts":planned_artifacts}),
-        report.diagnostics,
+        diagnostics,
         std::mem::take(&mut human),
         args.json,
-        false,
+        args.dry_run && !planned_conflicts.is_empty(),
     ))
 }
 
