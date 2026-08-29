@@ -1162,6 +1162,12 @@ fn mutate_spec(
 ) -> Result<Outcome, CliFailure> {
     use agentforge_core::model::{Content, Source};
     let mut spec = current.clone();
+    if operation == "remove" && !resource_exists(current, kind, value) {
+        return Err(CliFailure {
+            message: format!("{kind} '{value}' does not exist in project spec"),
+            exit: 1,
+        });
+    }
     let id = value
         .rsplit(['/', '\\'])
         .next()
@@ -1351,6 +1357,16 @@ fn resource_count(spec: &agentforge_core::model::ProjectSpec, kind: &str) -> usi
         "subagent" => spec.subagents.len(),
         "target" => spec.targets.len(),
         _ => 0,
+    }
+}
+
+fn resource_exists(spec: &agentforge_core::model::ProjectSpec, kind: &str, id: &str) -> bool {
+    match kind {
+        "skill" => spec.skills.iter().any(|item| item.id == id),
+        "mcp" => spec.mcp.iter().any(|item| item.id == id),
+        "subagent" => spec.subagents.iter().any(|item| item.id == id),
+        "target" => spec.targets.iter().any(|target| target.as_str() == id),
+        _ => false,
     }
 }
 

@@ -610,6 +610,25 @@ fn resource_remove_edits_canonical_spec_without_vendor_access() {
 }
 
 #[test]
+fn resource_remove_rejects_unknown_id_without_writing() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path());
+    let spec = fs::read(root.path().join(".agentforge/project.yaml")).unwrap();
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["subagent", "remove", "missing"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "subagent 'missing' does not exist",
+        ));
+    assert_eq!(
+        fs::read(root.path().join(".agentforge/project.yaml")).unwrap(),
+        spec
+    );
+}
+
+#[test]
 fn resource_dry_run_uses_plan_and_restores_canonical_spec() {
     let root = tempfile::tempdir().unwrap();
     setup(root.path());
