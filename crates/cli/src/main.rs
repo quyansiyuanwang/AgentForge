@@ -856,20 +856,6 @@ fn mutate_spec(
     }
     let path = root.join(".agentforge/project.yaml");
     let rendered = serde_yaml::to_string(&spec).map_err(internal)?;
-    let planned_artifacts = spec
-        .targets
-        .iter()
-        .flat_map(|target| match target {
-            Target::Generic => vec![
-                "AGENTS.md",
-                ".agentforge/generated/settings.yaml",
-                ".agentforge/generated/mcp.json",
-            ],
-            Target::Codex => vec!["AGENTS.md", ".codex/config.toml"],
-            Target::Claude => vec!["CLAUDE.md", ".mcp.json", ".claude/settings.json"],
-            Target::Copilot => vec![".github/copilot-instructions.md", ".github/mcp.json"],
-        })
-        .collect::<Vec<_>>();
     let summary = json!({
         "operation": operation,
         "resource": kind,
@@ -1009,7 +995,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
     let spec = agentforge_core::model::ProjectSpec {
         schema_version: "1".into(),
         project: agentforge_core::model::Project { name },
-        targets: target_values,
+        targets: target_values.clone(),
         instructions: vec![],
         skills,
         mcp,
@@ -1018,6 +1004,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         extensions: Default::default(),
     };
     let rendered = serde_yaml::to_string(&spec).map_err(internal)?;
+    let planned_artifacts = planned_artifacts(&target_values);
     let report = DetectionEngine::with_builtins().detect(&DetectionContext {
         root: &root,
         filesystem: &RealFileSystem,
@@ -1107,6 +1094,33 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         args.json,
         false,
     ))
+}
+
+fn planned_artifacts(targets: &[Target]) -> Vec<String> {
+    let mut paths = std::collections::BTreeSet::new();
+    for target in targets {
+        match target {
+            Target::Generic => {
+                paths.insert("AGENTS.md".to_owned());
+                paths.insert(".agentforge/generated/mcp.json".to_owned());
+                paths.insert(".agentforge/generated/settings.yaml".to_owned());
+            }
+            Target::Codex => {
+                paths.insert("AGENTS.md".to_owned());
+                paths.insert(".codex/config.toml".to_owned());
+            }
+            Target::Claude => {
+                paths.insert("CLAUDE.md".to_owned());
+                paths.insert(".mcp.json".to_owned());
+                paths.insert(".claude/settings.json".to_owned());
+            }
+            Target::Copilot => {
+                paths.insert(".github/copilot-instructions.md".to_owned());
+                paths.insert(".github/mcp.json".to_owned());
+            }
+        }
+    }
+    paths.into_iter().collect()
 }
 
 fn cli_source(value: &str) -> agentforge_core::model::Source {
