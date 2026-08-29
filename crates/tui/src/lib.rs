@@ -1,6 +1,7 @@
 //! Terminal interaction layer. The TUI emits intents; application services own all mutations.
 
 use agentforge_core::model::Target;
+use crossterm::event::{Event, KeyCode};
 use ratatui::{backend::TestBackend, buffer::Buffer, layout::Rect, widgets::Paragraph};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +72,18 @@ pub fn normalize_resize(width: u16, height: u16) -> Intent {
     Intent::Resize { width, height }
 }
 
+pub fn intent_from_event(event: Event) -> Option<Intent> {
+    match event {
+        Event::Key(key) => match key.code {
+            KeyCode::Enter => Some(Intent::Confirm),
+            KeyCode::Esc => Some(Intent::Cancel),
+            _ => None,
+        },
+        Event::Resize(width, height) => Some(normalize_resize(width, height)),
+        _ => None,
+    }
+}
+
 /// Renders a deterministic preview frame for both the interactive terminal and snapshot tests.
 pub fn preview_frame(title: &str, body: &str, profile: TerminalProfile) -> Buffer {
     let area = Rect::new(0, 0, profile.width, profile.height);
@@ -112,6 +125,21 @@ mod tests {
         assert_eq!(
             FlowState::new().reduce(Intent::Cancel),
             FlowState::Cancelled
+        );
+    }
+
+    #[test]
+    fn terminal_events_only_produce_intents() {
+        assert_eq!(
+            intent_from_event(Event::Resize(120, 30)),
+            Some(Intent::Resize {
+                width: 120,
+                height: 30
+            })
+        );
+        assert_eq!(
+            intent_from_event(Event::Key(crossterm::event::KeyEvent::from(KeyCode::Esc))),
+            Some(Intent::Cancel)
         );
     }
 }
