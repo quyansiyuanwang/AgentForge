@@ -1217,15 +1217,42 @@ fn text_diff(change: &ArtifactChange) -> String {
         .as_ref()
         .and_then(|desired| std::str::from_utf8(&desired.content).ok());
     match (before, after) {
-        (Some(before), Some(after)) => TextDiff::from_lines(before, after)
-            .unified_diff()
-            .header(&format!("a/{}", change.path), &format!("b/{}", change.path))
-            .to_string(),
+        (Some(before), Some(after)) => {
+            TextDiff::from_lines(&redact_text(before), &redact_text(after))
+                .unified_diff()
+                .header(&format!("a/{}", change.path), &format!("b/{}", change.path))
+                .to_string()
+        }
         _ => format!(
             "  {:?} -> {:?}\n",
             change.before_sha256, change.after_sha256
         ),
     }
+}
+
+fn redact_text(value: &str) -> String {
+    value
+        .lines()
+        .map(|line| {
+            let lower = line.to_ascii_lowercase();
+            if [
+                "token",
+                "secret",
+                "password",
+                "authorization",
+                "cookie",
+                "api_key",
+            ]
+            .iter()
+            .any(|key| lower.contains(key))
+            {
+                "[REDACTED SENSITIVE LINE]".to_owned()
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 fn repository_root() -> std::io::Result<PathBuf> {
     let current = env::current_dir()?;
