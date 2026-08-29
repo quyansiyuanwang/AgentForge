@@ -838,17 +838,17 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
             exit: 1,
         });
     }
-    if args.non_interactive && args.targets.is_empty() {
+    if args.targets.is_empty() {
         return Err(CliFailure {
-            message: "--non-interactive requires at least one --target".into(),
+            message: if args.non_interactive {
+                "--non-interactive requires at least one --target".into()
+            } else {
+                "init requires an explicit --target; interactive selection is not available in this terminal".into()
+            },
             exit: 2,
         });
     }
-    let targets = if args.targets.is_empty() {
-        vec![TargetArg::Generic]
-    } else {
-        args.targets
-    };
+    let targets = args.targets;
     let mut target_values = targets
         .into_iter()
         .map(|target| match target {
