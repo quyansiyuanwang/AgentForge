@@ -2189,9 +2189,11 @@ mod tests {
         fs::create_dir_all(&vendor).unwrap();
         fs::write(vendor.join("new.txt"), b"new").unwrap();
         let lock = root.path().join(".agentforge/lock.yaml");
-        restore_update_state(root.path(), &lock, None, true, &backup).unwrap();
+        fs::write(&lock, b"new-lock").unwrap();
+        restore_update_state(root.path(), &lock, Some(b"old-lock"), true, &backup).unwrap();
         assert!(vendor.join("old.txt").exists());
         assert!(!vendor.join("new.txt").exists());
+        assert_eq!(fs::read(&lock).unwrap(), b"old-lock");
 
         fs::create_dir_all(&vendor).unwrap();
         fs::write(vendor.join("new.txt"), b"new").unwrap();
