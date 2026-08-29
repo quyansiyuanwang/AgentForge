@@ -243,6 +243,31 @@ fn init_three_vendor_targets_is_idempotent() {
 }
 
 #[test]
+fn doctor_reports_missing_lockfile_as_warning() {
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "ai/project.md", "instructions\n");
+    write(
+        root.path(),
+        ".agentforge/project.yaml",
+        "schemaVersion: '1'\nproject: { name: fixture }\ntargets: [generic]\ninstructions: [{ id: project, source: { type: local, path: ai/project.md } }]\n",
+    );
+    let output = cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["doctor", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["status"], "warning");
+    assert!(value["diagnostics"].as_array().unwrap().iter().any(|item| {
+        item["message"]
+            .as_str()
+            .unwrap()
+            .contains("lock.yaml is missing")
+    }));
+}
+
+#[test]
 fn sync_json_returns_envelope() {
     let root = tempfile::tempdir().unwrap();
     setup(root.path());
