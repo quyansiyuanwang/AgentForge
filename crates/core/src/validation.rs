@@ -24,17 +24,24 @@ impl ValidationOutcome {
 
 #[derive(Debug)]
 pub struct SpecValidator {
-    schema: serde_json::Value,
+    validator: jsonschema::Validator,
 }
 
 impl SpecValidator {
+    /// Builds a validator around the embedded ProjectSpec schema. The JSON
+    /// Schema is compiled once here; [`Self::validate_value`] can then be
+    /// called repeatedly without recompiling it.
     pub fn new() -> Self {
-        Self {
-            schema: serde_json::from_str(PROJECT_SCHEMA)
-                .expect("embedded ProjectSpec schema must be valid JSON"),
-        }
+        let schema = serde_json::from_str(PROJECT_SCHEMA)
+            .expect("embedded ProjectSpec schema must be valid JSON");
+        let validator = jsonschema::options()
+            .with_draft(jsonschema::Draft::Draft202012)
+            .build(&schema)
+            .expect("embedded ProjectSpec schema must compile");
+        Self { validator }
     }
 
+    /// Parses and validates a YAML document; see [`Self::validate_value`].
     pub fn validate_yaml(&self, yaml: &str) -> ValidationOutcome {
         let value = match serde_yaml::from_str::<serde_json::Value>(yaml) {
             Ok(value) => value,
@@ -51,13 +58,12 @@ impl SpecValidator {
         self.validate_value(&value)
     }
 
+    /// Validates a parsed document against the JSON Schema and the semantic
+    /// rules (duplicate ids, unknown references, credential-free URLs, safe
+    /// paths). On success the deserialized [`ProjectSpec`] is returned.
     pub fn validate_value(&self, value: &serde_json::Value) -> ValidationOutcome {
-        let validator = jsonschema::options()
-            .with_draft(jsonschema::Draft::Draft202012)
-            .build(&self.schema)
-            .expect("embedded ProjectSpec schema must compile");
-
-        let mut diagnostics = validator
+        let mut diagnostics = self
+            .validator
             .iter_errors(value)
             .map(|error| {
                 let path = error.instance_path.to_string();

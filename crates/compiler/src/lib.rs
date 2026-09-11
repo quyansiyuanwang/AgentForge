@@ -653,6 +653,7 @@ skills:
             sha256: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
                 .into(),
             executable_content: false,
+            executable_paths: Vec::new(),
             file_count: 1,
             total_bytes: 1,
         };

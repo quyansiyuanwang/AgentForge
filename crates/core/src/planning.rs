@@ -5,6 +5,8 @@ use sha2::{Digest, Sha256};
 
 use crate::{Diagnostic, DiagnosticCode, model::Target};
 
+/// The applied-state journal: which artifacts AgentForge owns, keyed by path,
+/// with the renderer version and spec/lock hashes used to produce them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Manifest {
@@ -39,6 +41,7 @@ impl Manifest {
     }
 }
 
+/// Manifest ownership record for one managed path.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ManifestArtifact {
@@ -48,6 +51,7 @@ pub struct ManifestArtifact {
     pub sha256: String,
 }
 
+/// A single file a renderer wants in the working tree, with its content hash.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesiredArtifact {
     pub path: String,
@@ -56,6 +60,7 @@ pub struct DesiredArtifact {
     pub content: Vec<u8>,
 }
 
+/// How a managed path changes between the manifest state and the desired state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ChangeKind {
@@ -67,6 +72,8 @@ pub enum ChangeKind {
     ManualAction,
 }
 
+/// One planned change: what kind, the path, before/after hashes, and enough
+/// content to render diffs and stage the write.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactChange {
     pub path: String,
@@ -191,6 +198,10 @@ pub fn build_plan(
     })
 }
 
+/// Classifies one managed path into a [`ChangeKind`] from the manifest
+/// owner, the hash of the current working-tree content, and the hash of the
+/// desired content. Any divergence between the working tree and the manifest
+/// yields a [`ChangeKind::Conflict`] instead of an overwrite.
 fn classify(
     owner: Option<&ManifestArtifact>,
     current: Option<&str>,
@@ -229,4 +240,55 @@ pub fn content_hash(content: &[u8]) -> String {
 
 fn ownership_key(path: &str) -> String {
     path.replace('\\', "/").to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ChangeKind, ManifestArtifact, classify};
+
+    fn owner(sha: &str) -> ManifestArtifact {
+        ManifestArtifact {
+            path: "AGENTS.md".into(),
+            target: crate::model::Target::Generic,
+            renderer_version: "generic@0.1.0".into(),
+            sha256: sha.into(),
+        }
+    }
+
+    #[test]
+    fn classify_covers_every_state_combination() {
+        let (create, reason) = classify(None, None, Some("d"));
+        assert_eq!(create, ChangeKind::Create);
+        assert!(reason.is_none());
+
+        // A path with content but no manifest ownership is user-owned and
+        // must conflict instead of being overwritten.
+        let (conflict, reason) = classify(None, Some("x"), Some("d"));
+        assert_eq!(conflict, ChangeKind::Conflict);
+        assert!(reason.unwrap().contains("without manifest ownership"));
+
+        // Managed but locally modified paths conflict too.
+        let (conflict, _) = classify(Some(&owner("m")), Some("tampered"), Some("d"));
+        assert_eq!(conflict, ChangeKind::Conflict);
+
+        let (modified, reason) = classify(Some(&owner("m")), Some("m"), Some("d"));
+        assert_eq!(modified, ChangeKind::Modify);
+        assert!(reason.is_none());
+
+        let (unchanged, reason) = classify(Some(&owner("d")), Some("d"), Some("d"));
+        assert_eq!(unchanged, ChangeKind::Unchanged);
+        assert!(reason.is_none());
+
+        let (deleted, reason) = classify(Some(&owner("m")), Some("m"), None);
+        assert_eq!(deleted, ChangeKind::Delete);
+        assert!(reason.is_none());
+
+        let (rebuilt, reason) = classify(Some(&owner("m")), None, Some("d"));
+        assert_eq!(rebuilt, ChangeKind::Create);
+        assert!(reason.unwrap().contains("rebuilt"));
+
+        let (gone, reason) = classify(Some(&owner("m")), None, None);
+        assert_eq!(gone, ChangeKind::Delete);
+        assert!(reason.unwrap().contains("absent"));
+    }
 }
