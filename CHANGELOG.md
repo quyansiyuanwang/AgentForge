@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+- 持续改进文档、检测器和 target capability 覆盖。
+
+## [0.1.0] - 2026-09-12
+
+### 新增
+
+- 建立 ProjectSpec、JSON Schema、Detector/Resolver 和 ResolvedPlan。
+- 支持 local、URL、Git/GitHub、skills.sh 兼容源及官方 MCP Registry，并提供 lock/vendor、SHA-256 与离线同步。
+- 提供 Generic、Codex、Claude Code、GitHub Copilot renderer，含 manifest、漂移检测、冲突阻断和事务回滚。
+- 提供 init、detect、sync、diff、doctor、config、skill、mcp、subagent、target 命令及 JSON 输出。
+- 覆盖路径穿越、恶意符号链接、超限下载、未授权脚本和 secret 泄漏防护。
+- release workflow：tag 与 workspace 版本一致性校验、从 CHANGELOG 提取 release notes、四平台打包与 `SHA256SUMS.txt`，`-rc`/`-beta` tag 自动标记 pre-release。
+
 ### 修复
 
 - `--json` 在资源变更校验失败时保持机器可读输出，不再退回人类格式。
@@ -21,13 +34,3 @@
 - 退出码完整实现 `docs/cli.md` 契约：`3` 来源解析/网络错误，`4` 安全策略拒绝（vendor 校验、逃逸路径、超限、可执行内容），`5` 应用事务失败并已回滚，`6` 文件系统或配置 IO 错误。
 - CI quality/test job 显式安装 Rust toolchain，clippy 增加 `--locked`。
 - `SpecValidator` 只在构造时编译一次 JSON Schema；`planning::classify`、`resource_id` 等核心逻辑补充内联单元测试与公共 API rustdoc。
-
-- 持续改进文档、检测器和 target capability 覆盖。
-
-## [0.1.0] - 未正式发布
-
-- 建立 ProjectSpec、JSON Schema、Detector/Resolver 和 ResolvedPlan。
-- 支持 local、URL、Git/GitHub、skills.sh 兼容源及官方 MCP Registry，并提供 lock/vendor、SHA-256 与离线同步。
-- 提供 Generic、Codex、Claude Code、GitHub Copilot renderer，含 manifest、漂移检测、冲突阻断和事务回滚。
-- 提供 init、detect、sync、diff、doctor、config、skill、mcp、subagent、target 命令及 JSON 输出。
-- 覆盖路径穿越、恶意符号链接、超限下载、未授权脚本和 secret 泄漏防护。
