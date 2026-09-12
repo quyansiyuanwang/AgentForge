@@ -645,13 +645,41 @@ fn resource_remove_edits_canonical_spec_without_vendor_access() {
     let root = tempfile::tempdir().unwrap();
     setup(root.path());
     fs::write(root.path().join(".agentforge/lock.yaml"), b"not valid lock").unwrap();
+    let spec = fs::read(root.path().join(".agentforge/project.yaml")).unwrap();
     let output = cargo_bin_cmd!("agentforge")
         .current_dir(root.path())
         .args(["skill", "remove", "testing", "--dry-run", "--json"])
         .output()
         .unwrap();
+    // Removing a skill referenced by a subagent fails validation, and --json
+    // must keep machine-readable output on stdout even in the failure case.
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("AF1103"));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["status"], "failure");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("AF1103"));
+    assert_eq!(
+        fs::read(root.path().join(".agentforge/project.yaml")).unwrap(),
+        spec
+    );
+}
+
+#[test]
+fn remote_update_rejects_corrupt_lockfile_without_touching_state() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path());
+    fs::write(root.path().join(".agentforge/lock.yaml"), b"not valid lock").unwrap();
+    let vendor = root.path().join(".agentforge/vendor");
+    fs::create_dir_all(&vendor).unwrap();
+    fs::write(vendor.join("keep.txt"), b"keep").unwrap();
+    let output = cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["skill", "update", "--json"])
+        .output()
+        .unwrap();
+    // A corrupt lock must be a hard error, never a silently emptied lock.
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("lock.yaml is invalid"));
+    assert!(vendor.join("keep.txt").exists());
 }
 
 #[test]
@@ -671,6 +699,45 @@ fn resource_remove_rejects_unknown_id_without_writing() {
         fs::read(root.path().join(".agentforge/project.yaml")).unwrap(),
         spec
     );
+}
+
+#[test]
+fn skill_add_rejects_single_file_sources_as_usage_error() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path());
+    fs::write(root.path().join("deploy.md"), b"# deploy").unwrap();
+    cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["skill", "add", "deploy.md"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "skills need a directory containing SKILL.md",
+        ));
+    let spec = fs::read(root.path().join(".agentforge/project.yaml")).unwrap();
+    assert!(String::from_utf8_lossy(&spec).contains("id: testing"));
+    assert!(!String::from_utf8_lossy(&spec).contains("id: deploy"));
+}
+
+#[test]
+fn mcp_remove_accepts_the_path_used_at_add_time() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path());
+    // The fixture server has id `github`; a remove value that normalizes to
+    // the same id (path segments and a case-insensitive .md suffix stripped)
+    // must resolve to that resource instead of "does not exist".
+    let output = cargo_bin_cmd!("agentforge")
+        .current_dir(root.path())
+        .args(["mcp", "remove", "servers/GitHub.md", "--dry-run", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["data"]["summary"]["id"], "servers/GitHub.md");
 }
 
 #[test]

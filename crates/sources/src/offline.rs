@@ -30,7 +30,9 @@ pub fn verify_vendor_offline(
                 .vendor_path
                 .replace('/', std::path::MAIN_SEPARATOR_STR),
         );
-        let tree = VendorTree::validate(read_tree(&directory)?, limits, installed)?;
+        let executable_paths = entry.executable_paths.iter().cloned().collect();
+        let tree =
+            VendorTree::validate(read_tree(&directory, &executable_paths)?, limits, installed)?;
         if tree.sha256 != entry.sha256 {
             return Err(offline(
                 &entry.vendor_path,
@@ -61,7 +63,10 @@ pub fn verify_vendor_offline(
     Ok(())
 }
 
-fn read_tree(root: &Path) -> Result<Vec<UntrustedEntry>, SourceError> {
+fn read_tree(
+    root: &Path,
+    executable_paths: &std::collections::BTreeSet<String>,
+) -> Result<Vec<UntrustedEntry>, SourceError> {
     if !root.is_dir() {
         return Err(offline(
             &root.display().to_string(),
@@ -101,9 +106,9 @@ fn read_tree(root: &Path) -> Result<Vec<UntrustedEntry>, SourceError> {
                 } else {
                     let content = fs::read(&path).map_err(|error| offline_io(&path, error))?;
                     entries.push(UntrustedEntry {
-                        path: relative,
+                        path: relative.clone(),
                         kind: EntryKind::Regular,
-                        mode: executable_mode(&metadata),
+                        mode: recorded_mode(&relative, executable_paths, &metadata),
                         content,
                     });
                 }
@@ -172,13 +177,38 @@ fn has_multiple_links(_path: &Path, _metadata: &fs::Metadata) -> io::Result<bool
     Ok(false)
 }
 #[cfg(unix)]
+fn recorded_mode(
+    relative: &str,
+    executable_paths: &std::collections::BTreeSet<String>,
+    metadata: &fs::Metadata,
+) -> u32 {
+    if executable_paths.contains(relative) {
+        return 0o755;
+    }
+    let mode = executable_mode(metadata);
+    // A locally flipped bit that the lock does not record must still be
+    // classified executable, otherwise an attacker-placed interpreter shim
+    // could hide behind a lock created on a case-normalizing filesystem.
+    if mode & 0o111 != 0 { 0o755 } else { 0o644 }
+}
+#[cfg(not(unix))]
+fn recorded_mode(
+    relative: &str,
+    executable_paths: &std::collections::BTreeSet<String>,
+    _metadata: &fs::Metadata,
+) -> u32 {
+    // Windows filesystems do not expose Unix permission bits, so the
+    // classification recorded in the lock is the only source of truth.
+    if executable_paths.contains(relative) {
+        0o755
+    } else {
+        0o644
+    }
+}
+#[cfg(unix)]
 fn executable_mode(metadata: &fs::Metadata) -> u32 {
     use std::os::unix::fs::PermissionsExt;
     metadata.permissions().mode()
-}
-#[cfg(not(unix))]
-fn executable_mode(_metadata: &fs::Metadata) -> u32 {
-    0o644
 }
 #[cfg(unix)]
 fn special_kind(file_type: &fs::FileType) -> EntryKind {

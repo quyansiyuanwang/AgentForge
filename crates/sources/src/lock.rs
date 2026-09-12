@@ -86,6 +86,12 @@ pub struct LockEntry {
     pub vendor_path: String,
     pub sha256: String,
     pub executable_content: bool,
+    /// Vendor-relative paths that the platform-independent classification
+    /// marked executable. Unix permission bits cannot be recovered on every
+    /// filesystem, so the lock carries the authoritative list and offline
+    /// verification replays it before hashing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub executable_paths: Vec<String>,
     pub file_count: u64,
     pub total_bytes: u64,
 }

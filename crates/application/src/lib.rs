@@ -152,6 +152,9 @@ struct Mutation {
     had_original: bool,
 }
 
+/// Applies resolved plans to the working tree as a transaction: writes are
+/// staged, validated, swapped atomically, and rolled back from the journal if
+/// any step fails. `recover_if_needed` completes an interrupted transaction.
 pub struct ApplicationService<V = ArtifactValidator, F = NoFaults> {
     root: PathBuf,
     validator: V,

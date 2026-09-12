@@ -352,6 +352,12 @@ impl<H: HttpFetcher, G: GitFetcher> SourceService<H, G> {
             ),
             sha256: vendor.sha256.clone(),
             executable_content: vendor.executable_content,
+            executable_paths: vendor
+                .files
+                .iter()
+                .filter(|file| file.executable)
+                .map(|file| file.path.clone())
+                .collect(),
             file_count: u64::try_from(vendor.files.len()).unwrap_or(u64::MAX),
             total_bytes: vendor.total_bytes,
         };

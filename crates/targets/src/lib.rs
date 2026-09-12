@@ -20,6 +20,7 @@ pub use codex::CodexRenderer;
 pub use copilot::CopilotRenderer;
 pub use generic::GenericRenderer;
 
+/// Fully resolved, target-neutral inputs one render pass consumes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderRequest {
     pub project_name: String,
@@ -75,13 +76,21 @@ pub struct ManualAction {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RenderOutput {
+    /// Whole-file managed artifacts this renderer owns.
     pub artifacts: Vec<DesiredArtifact>,
+    /// Steps AgentForge cannot perform and the user must apply by hand.
     pub manual_actions: Vec<ManualAction>,
 }
 
+/// A pure renderer for one target: it maps a [`RenderRequest`] to desired
+/// artifacts and never touches the filesystem or the network.
 pub trait Renderer: Send + Sync {
+    /// Static metadata (target id and renderer version) recorded in the
+    /// manifest for drift detection.
     fn descriptor(&self) -> RendererDescriptor;
+    /// Renders the request into desired artifacts and manual actions.
     fn render(&self, request: &RenderRequest) -> Result<RenderOutput, RenderError>;
+    /// Re-checks rendered artifacts (unique, safe paths; valid JSON payloads).
     fn validate(&self, artifacts: &[DesiredArtifact]) -> Result<(), RenderError>;
 }
 

@@ -12,6 +12,6 @@
 | `config validate/show` | 校验或查看 ProjectSpec |
 | `skill/mcp/subagent/target` | 管理对应资源或 target |
 
-`init --non-interactive` 必须提供 `--target` 或已有 spec；非 Git 目录需 `--allow-non-git`。资源 `update` 才允许联网刷新，必要时使用 `--strict`、`--allow-unpinned-source` 或 `--allow-executable-content`。
+`init --non-interactive` 必须提供 `--target` 或已有 spec；非 Git 目录需 `--allow-non-git`。只有资源 `update`（以及 `init --dry-run` 对远程源的预览）允许联网，普通 `sync`/`diff` 始终离线；必要时使用 `--strict`、`--allow-unpinned-source` 或 `--allow-executable-content`。
 
 退出码：`0` 成功；`1` 业务验证失败或 strict warning；`2` 参数用法错误；`3` 来源解析/网络错误；`4` 安全策略拒绝；`5` 应用事务失败并已回滚；`6` 文件系统或配置 IO 错误。

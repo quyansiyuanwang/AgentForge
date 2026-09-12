@@ -294,10 +294,7 @@ fn sync(root: &Path, args: SyncArgs) -> Result<Outcome, CliFailure> {
     if !args.dry_run && compilation.plan.has_changes() {
         ApplicationService::new(root)
             .apply(&compilation.plan)
-            .map_err(|error| CliFailure {
-                message: error.to_string(),
-                exit: 3,
-            })?;
+            .map_err(apply_failure)?;
     }
     let human = if args.dry_run {
         preview
@@ -412,8 +409,8 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
     }
     checks.push(json!({
         "check":"vendor",
-        "healthy":true,
-        "verified":"offline",
+        "healthy":lock_path.exists(),
+        "verified":lock_path.exists(),
         "sourceCount":vendor_source_count
     }));
     let manifest = std::fs::read(&manifest_path).ok().and_then(|bytes| {
@@ -477,6 +474,7 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
     }));
     checks.push(json!({
         "check": "mcpSecurity",
+        "healthy": true,
         "servers": mcp_security_summary(&compilation.spec)
     }));
     for variable in compilation
@@ -507,12 +505,7 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
             Target::Claude => ("claude", "Claude Code"),
             Target::Copilot => ("copilot", "GitHub Copilot"),
         };
-        let version = ProcessCommand::new(binary)
-            .arg("--version")
-            .output()
-            .ok()
-            .filter(|output| output.status.success())
-            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned());
+        let version = probe_agent_version(binary);
         checks.push(json!({"check":"agentVersion", "target":target.as_str(), "version":version}));
         if version.is_none() {
             compilation.diagnostics.push(
@@ -566,6 +559,54 @@ fn doctor(root: &Path, args: DoctorArgs) -> Result<Outcome, CliFailure> {
     ))
 }
 
+/// Probes `<binary> --version` with a hard timeout. On Windows, agent CLIs
+/// are typically npm shims (`claude.cmd`), which `CreateProcess` cannot
+/// resolve directly, so the probe goes through `cmd /C`.
+fn probe_agent_version(binary: &str) -> Option<String> {
+    use std::{
+        io::Read,
+        process::Stdio,
+        time::{Duration, Instant},
+    };
+    #[cfg(windows)]
+    let mut command = {
+        let mut command = ProcessCommand::new("cmd");
+        command.args(["/C", binary, "--version"]);
+        command
+    };
+    #[cfg(not(windows))]
+    let mut command = {
+        let mut command = ProcessCommand::new(binary);
+        command.arg("--version");
+        command
+    };
+    command.stdin(Stdio::null());
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    let mut child = command.spawn().ok()?;
+    let mut stdout = child.stdout.take()?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
+            // Still running or probe failed: kill it so doctor never hangs.
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+        }
+    }?;
+    if !status.success() {
+        return None;
+    }
+    let mut output = String::new();
+    stdout.read_to_string(&mut output).ok()?;
+    let version = output.trim().to_owned();
+    (!version.is_empty()).then_some(version)
+}
+
 fn compile_error_diagnostics(error: CompileError) -> Vec<Diagnostic> {
     let error = match error {
         CompileError::InvalidSpec(diagnostics) => return diagnostics,
@@ -611,8 +652,8 @@ fn config(root: &Path, command: ConfigCommand) -> Result<Outcome, CliFailure> {
         }
         ConfigCommand::Show { json } => {
             let spec = load_spec(root)?;
-            let data = serde_json::to_value(&spec).map_err(internal)?;
-            let human = serde_yaml::to_string(&spec).map_err(internal)?;
+            let data = serde_json::to_value(&spec).map_err(config_error)?;
+            let human = serde_yaml::to_string(&spec).map_err(config_error)?;
             Ok(outcome_value(
                 "config show",
                 data,
@@ -657,7 +698,7 @@ fn resources(root: &Path, kind: &str, command: ResourceCommand) -> Result<Outcom
                 Target::Claude,
                 Target::Copilot,
             ];
-            let data = serde_json::to_value(targets).map_err(internal)?;
+            let data = serde_json::to_value(targets).map_err(config_error)?;
             return Ok(outcome_value(
                 "target list",
                 data,
@@ -682,7 +723,7 @@ fn resources(root: &Path, kind: &str, command: ResourceCommand) -> Result<Outcom
                 "target" => serde_json::to_value(&spec.targets),
                 _ => unreachable!(),
             }
-            .map_err(internal)?;
+            .map_err(config_error)?;
             let human = match data.as_array() {
                 Some(values) if values.is_empty() => "None".into(),
                 Some(values) => values
@@ -777,13 +818,16 @@ fn update_resources(
     }
     let lock_path = root.join(".agentforge/lock.yaml");
     let previous_lock = std::fs::read(&lock_path).ok();
-    let existing = previous_lock
-        .as_deref()
-        .and_then(|bytes| serde_yaml::from_slice::<LockFile>(bytes).ok())
-        .unwrap_or_else(|| {
-            LockFile::new(format!("agentforge {}", env!("CARGO_PKG_VERSION")), vec![])
-                .expect("empty lock")
-        });
+    let existing = match previous_lock.as_deref() {
+        Some(bytes) => serde_yaml::from_slice::<LockFile>(bytes).map_err(|error| CliFailure {
+            message: format!(
+                ".agentforge/lock.yaml is invalid: {error}; restore the lock from version control before updating remote sources"
+            ),
+            exit: 1,
+        })?,
+        None => LockFile::new(format!("agentforge {}", env!("CARGO_PKG_VERSION")), vec![])
+            .expect("empty lock"),
+    };
     let vendor_root = root.join(".agentforge/vendor");
     let vendor_backup = root.join(format!(
         ".agentforge/.update-vendor-backup-{}",
@@ -797,142 +841,131 @@ fn update_resources(
                     "stale update vendor backup exists: {}",
                     vendor_backup.display()
                 ),
-                exit: 3,
+                exit: 6,
             });
         }
         std::fs::rename(&vendor_root, &vendor_backup).map_err(runtime)?;
     }
-    let tokio_runtime = tokio::runtime::Runtime::new().map_err(internal)?;
-    let updated_result = tokio_runtime
-        .block_on(async {
-            let http = ReqwestHttpFetcher::new().map_err(|error| error.to_string())?;
-            let service = SourceService::new(http, ProcessGitFetcher::default());
-            let mut entries = existing.sources.clone();
-            let mut changed = Vec::new();
-            let mut pending_vendor = Vec::new();
-            let mut cleanup_vendor = Vec::new();
-            if kind == "skill" {
-                for item in spec
-                    .skills
-                    .iter()
-                    .filter(|item| selected.is_none_or(|id| id == item.id))
-                {
-                    if matches!(item.source, agentforge_core::model::Source::Local { .. }) {
-                        continue;
-                    }
-                    if let ResolvedSource::Remote { lock, vendor } = service
-                        .resolve(ResolveRequest {
-                            kind: ContentKind::Skill,
-                            id: &item.id,
-                            source: &item.source,
-                            allow_unpinned,
-                            allow_executable_content,
-                            installed_vendor_bytes: existing
-                                .sources
-                                .iter()
-                                .filter(|entry| {
-                                    !(entry.kind == ContentKind::Skill && entry.id == item.id)
-                                })
-                                .map(|entry| entry.total_bytes)
-                                .sum(),
-                        })
-                        .await
-                        .map_err(|error| error.to_string())?
-                    {
-                        let summary =
-                            remote_summary(ContentKind::Skill, &item.id, &lock, &vendor, &[]);
-                        if !dry_run {
-                            pending_vendor.push((lock.vendor_path.clone(), vendor));
-                            cleanup_vendor.push(PathBuf::from(
-                                lock.vendor_path.replace('/', std::path::MAIN_SEPARATOR_STR),
-                            ));
-                        }
-                        entries.retain(|entry| {
-                            !(entry.kind == ContentKind::Skill && entry.id == item.id)
-                        });
-                        entries.push(*lock);
-                        changed.push(summary);
-                    }
+    let tokio_runtime = tokio::runtime::Runtime::new().map_err(config_error)?;
+    let updated_result = tokio_runtime.block_on(async {
+        let http = ReqwestHttpFetcher::new().map_err(config_error)?;
+        let service = SourceService::new(http, ProcessGitFetcher::default());
+        let mut entries = existing.sources.clone();
+        let mut changed = Vec::new();
+        let mut pending_vendor = Vec::new();
+        let mut cleanup_vendor = Vec::new();
+        if kind == "skill" {
+            for item in spec
+                .skills
+                .iter()
+                .filter(|item| selected.is_none_or(|id| id == item.id))
+            {
+                if matches!(item.source, agentforge_core::model::Source::Local { .. }) {
+                    continue;
                 }
-            } else {
-                for item in spec
-                    .mcp
-                    .iter()
-                    .filter_map(|item| item.source.as_ref().map(|source| (item, source)))
-                    .filter(|(item, _)| selected.is_none_or(|id| id == item.id))
-                {
-                    if matches!(item.1, agentforge_core::model::Source::Local { .. }) {
-                        continue;
-                    }
-                    if let ResolvedSource::Remote { lock, vendor } = service
-                        .resolve(ResolveRequest {
-                            kind: ContentKind::Mcp,
-                            id: &item.0.id,
-                            source: item.1,
-                            allow_unpinned,
-                            allow_executable_content,
-                            installed_vendor_bytes: existing
-                                .sources
-                                .iter()
-                                .filter(|entry| {
-                                    !(entry.kind == ContentKind::Mcp && entry.id == item.0.id)
-                                })
-                                .map(|entry| entry.total_bytes)
-                                .sum(),
-                        })
-                        .await
-                        .map_err(|error| error.to_string())?
-                    {
-                        let summary = remote_summary(
-                            ContentKind::Mcp,
-                            &item.0.id,
-                            &lock,
-                            &vendor,
-                            &item.0.env,
-                        );
-                        if !dry_run {
-                            pending_vendor.push((lock.vendor_path.clone(), vendor));
-                            cleanup_vendor.push(PathBuf::from(
-                                lock.vendor_path.replace('/', std::path::MAIN_SEPARATOR_STR),
-                            ));
-                        }
-                        entries.retain(|entry| {
-                            !(entry.kind == ContentKind::Mcp && entry.id == item.0.id)
-                        });
-                        entries.push(*lock);
-                        changed.push(summary);
-                    }
-                }
-            }
-            if !dry_run {
-                let lock =
-                    LockFile::new(format!("agentforge {}", env!("CARGO_PKG_VERSION")), entries)
-                        .map_err(|error| error.to_string())?;
-                let yaml = lock.to_yaml().map_err(|error| error.to_string())?;
-                let files = pending_vendor
-                    .into_iter()
-                    .flat_map(|(vendor_path, vendor)| {
-                        vendor.files.into_iter().map(move |file| {
-                            (
-                                PathBuf::from(format!("{vendor_path}/{}", file.path)),
-                                file.content,
-                                file.mode,
-                            )
-                        })
+                if let ResolvedSource::Remote { lock, vendor } = service
+                    .resolve(ResolveRequest {
+                        kind: ContentKind::Skill,
+                        id: &item.id,
+                        source: &item.source,
+                        allow_unpinned,
+                        allow_executable_content,
+                        installed_vendor_bytes: existing
+                            .sources
+                            .iter()
+                            .filter(|entry| {
+                                !(entry.kind == ContentKind::Skill && entry.id == item.id)
+                            })
+                            .map(|entry| entry.total_bytes)
+                            .sum(),
                     })
-                    .chain(std::iter::once((
-                        PathBuf::from(".agentforge/lock.yaml"),
-                        yaml.into_bytes(),
-                        0o644,
-                    )))
-                    .collect::<Vec<_>>();
-                ApplicationService::new(root)
-                    .apply_control_files_with_modes_and_cleanup(&files, &cleanup_vendor)
-                    .map_err(|error| error.to_string())?;
+                    .await
+                    .map_err(source_failure)?
+                {
+                    let summary = remote_summary(ContentKind::Skill, &item.id, &lock, &vendor, &[]);
+                    if !dry_run {
+                        pending_vendor.push((lock.vendor_path.clone(), vendor));
+                        cleanup_vendor.push(PathBuf::from(
+                            lock.vendor_path.replace('/', std::path::MAIN_SEPARATOR_STR),
+                        ));
+                    }
+                    entries
+                        .retain(|entry| !(entry.kind == ContentKind::Skill && entry.id == item.id));
+                    entries.push(*lock);
+                    changed.push(summary);
+                }
             }
-            Ok::<_, String>(changed)
-        })
-        .map_err(|message| CliFailure { message, exit: 3 });
+        } else {
+            for item in spec
+                .mcp
+                .iter()
+                .filter_map(|item| item.source.as_ref().map(|source| (item, source)))
+                .filter(|(item, _)| selected.is_none_or(|id| id == item.id))
+            {
+                if matches!(item.1, agentforge_core::model::Source::Local { .. }) {
+                    continue;
+                }
+                if let ResolvedSource::Remote { lock, vendor } = service
+                    .resolve(ResolveRequest {
+                        kind: ContentKind::Mcp,
+                        id: &item.0.id,
+                        source: item.1,
+                        allow_unpinned,
+                        allow_executable_content,
+                        installed_vendor_bytes: existing
+                            .sources
+                            .iter()
+                            .filter(|entry| {
+                                !(entry.kind == ContentKind::Mcp && entry.id == item.0.id)
+                            })
+                            .map(|entry| entry.total_bytes)
+                            .sum(),
+                    })
+                    .await
+                    .map_err(source_failure)?
+                {
+                    let summary =
+                        remote_summary(ContentKind::Mcp, &item.0.id, &lock, &vendor, &item.0.env);
+                    if !dry_run {
+                        pending_vendor.push((lock.vendor_path.clone(), vendor));
+                        cleanup_vendor.push(PathBuf::from(
+                            lock.vendor_path.replace('/', std::path::MAIN_SEPARATOR_STR),
+                        ));
+                    }
+                    entries
+                        .retain(|entry| !(entry.kind == ContentKind::Mcp && entry.id == item.0.id));
+                    entries.push(*lock);
+                    changed.push(summary);
+                }
+            }
+        }
+        if !dry_run {
+            let lock = LockFile::new(format!("agentforge {}", env!("CARGO_PKG_VERSION")), entries)
+                .map_err(config_error)?;
+            let yaml = lock.to_yaml().map_err(config_error)?;
+            let files = pending_vendor
+                .into_iter()
+                .flat_map(|(vendor_path, vendor)| {
+                    vendor.files.into_iter().map(move |file| {
+                        (
+                            PathBuf::from(format!("{vendor_path}/{}", file.path)),
+                            file.content,
+                            file.mode,
+                        )
+                    })
+                })
+                .chain(std::iter::once((
+                    PathBuf::from(".agentforge/lock.yaml"),
+                    yaml.into_bytes(),
+                    0o644,
+                )))
+                .collect::<Vec<_>>();
+            ApplicationService::new(root)
+                .apply_control_files_with_modes_and_cleanup(&files, &cleanup_vendor)
+                .map_err(apply_failure)?;
+        }
+        Ok::<_, CliFailure>(changed)
+    });
     let updated = match updated_result {
         Ok(updated) => updated,
         Err(error) => {
@@ -992,7 +1025,7 @@ fn update_resources(
                     previous_vendor,
                     &vendor_backup,
                 )?;
-                return Err(runtime(error));
+                return Err(apply_failure(error));
             }
             generated_preview = human_diff(&compilation);
         }
@@ -1069,68 +1102,66 @@ fn preview_remote_sources(
     allow_unpinned: bool,
     allow_executable_content: bool,
 ) -> Result<Vec<Value>, CliFailure> {
-    let runtime = tokio::runtime::Runtime::new().map_err(internal)?;
-    runtime
-        .block_on(async {
-            let http = ReqwestHttpFetcher::new().map_err(|error| error.to_string())?;
-            let service = SourceService::new(http, ProcessGitFetcher::default());
-            let mut summaries = Vec::new();
-            for item in &spec.skills {
-                if matches!(item.source, agentforge_core::model::Source::Local { .. }) {
-                    continue;
-                }
-                if let ResolvedSource::Remote { lock, vendor } = service
-                    .resolve(ResolveRequest {
-                        kind: ContentKind::Skill,
-                        id: &item.id,
-                        source: &item.source,
-                        allow_unpinned,
-                        allow_executable_content,
-                        installed_vendor_bytes: 0,
-                    })
-                    .await
-                    .map_err(|error| error.to_string())?
-                {
-                    summaries.push(remote_summary(
-                        ContentKind::Skill,
-                        &item.id,
-                        &lock,
-                        &vendor,
-                        &[],
-                    ));
-                }
+    let runtime = tokio::runtime::Runtime::new().map_err(config_error)?;
+    runtime.block_on(async {
+        let http = ReqwestHttpFetcher::new().map_err(config_error)?;
+        let service = SourceService::new(http, ProcessGitFetcher::default());
+        let mut summaries = Vec::new();
+        for item in &spec.skills {
+            if matches!(item.source, agentforge_core::model::Source::Local { .. }) {
+                continue;
             }
-            for item in &spec.mcp {
-                let Some(source) = item.source.as_ref() else {
-                    continue;
-                };
-                if matches!(source, agentforge_core::model::Source::Local { .. }) {
-                    continue;
-                }
-                if let ResolvedSource::Remote { lock, vendor } = service
-                    .resolve(ResolveRequest {
-                        kind: ContentKind::Mcp,
-                        id: &item.id,
-                        source,
-                        allow_unpinned,
-                        allow_executable_content,
-                        installed_vendor_bytes: 0,
-                    })
-                    .await
-                    .map_err(|error| error.to_string())?
-                {
-                    summaries.push(remote_summary(
-                        ContentKind::Mcp,
-                        &item.id,
-                        &lock,
-                        &vendor,
-                        &item.env,
-                    ));
-                }
+            if let ResolvedSource::Remote { lock, vendor } = service
+                .resolve(ResolveRequest {
+                    kind: ContentKind::Skill,
+                    id: &item.id,
+                    source: &item.source,
+                    allow_unpinned,
+                    allow_executable_content,
+                    installed_vendor_bytes: 0,
+                })
+                .await
+                .map_err(source_failure)?
+            {
+                summaries.push(remote_summary(
+                    ContentKind::Skill,
+                    &item.id,
+                    &lock,
+                    &vendor,
+                    &[],
+                ));
             }
-            Ok::<_, String>(summaries)
-        })
-        .map_err(|message| CliFailure { message, exit: 3 })
+        }
+        for item in &spec.mcp {
+            let Some(source) = item.source.as_ref() else {
+                continue;
+            };
+            if matches!(source, agentforge_core::model::Source::Local { .. }) {
+                continue;
+            }
+            if let ResolvedSource::Remote { lock, vendor } = service
+                .resolve(ResolveRequest {
+                    kind: ContentKind::Mcp,
+                    id: &item.id,
+                    source,
+                    allow_unpinned,
+                    allow_executable_content,
+                    installed_vendor_bytes: 0,
+                })
+                .await
+                .map_err(source_failure)?
+            {
+                summaries.push(remote_summary(
+                    ContentKind::Mcp,
+                    &item.id,
+                    &lock,
+                    &vendor,
+                    &item.env,
+                ));
+            }
+        }
+        Ok::<_, CliFailure>(summaries)
+    })
 }
 
 fn remote_summary(
@@ -1172,33 +1203,31 @@ fn mutate_spec(
 ) -> Result<Outcome, CliFailure> {
     use agentforge_core::model::{Content, Source};
     let mut spec = current.clone();
-    if operation == "remove" && !resource_exists(current, kind, value) {
+    let id = resource_id(value);
+    if operation == "remove" && kind != "target" && !resource_exists(current, kind, &id) {
         return Err(CliFailure {
             message: format!("{kind} '{value}' does not exist in project spec"),
             exit: 1,
         });
     }
-    let id = value
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(value)
-        .trim_end_matches(".md")
-        .to_lowercase();
     match (kind, operation) {
-        ("skill", "add") => spec.skills.push(Content {
-            id,
-            source: Source::Local { path: value.into() },
-            applies_to: vec![],
-        }),
-        ("skill", "remove") => spec.skills.retain(|item| item.id != value),
+        ("skill", "add") => {
+            ensure_compilable_skill_source(root, value)?;
+            spec.skills.push(Content {
+                id,
+                source: Source::Local { path: value.into() },
+                applies_to: vec![],
+            });
+        }
+        ("skill", "remove") => spec.skills.retain(|item| item.id != id),
         ("mcp", "add") => spec.mcp.push(agentforge_core::model::Mcp {
             id,
             source: Some(Source::Local { path: value.into() }),
             transport: None,
             env: vec![],
         }),
-        ("mcp", "remove") => spec.mcp.retain(|item| item.id != value),
-        ("subagent", "remove") => spec.subagents.retain(|item| item.id != value),
+        ("mcp", "remove") => spec.mcp.retain(|item| item.id != id),
+        ("subagent", "remove") => spec.subagents.retain(|item| item.id != id),
         ("subagent", "add") => spec.subagents.push(agentforge_core::model::Subagent {
             id,
             description: format!("AgentForge subagent from {value}"),
@@ -1241,20 +1270,20 @@ fn mutate_spec(
         }
     }
     let validation =
-        SpecValidator::new().validate_yaml(&serde_yaml::to_string(&spec).map_err(internal)?);
+        SpecValidator::new().validate_yaml(&serde_yaml::to_string(&spec).map_err(config_error)?);
     if !validation.is_valid() {
         return Ok(outcome_value(
             &format!("{kind} {operation}"),
             json!({"valid":false}),
             validation.diagnostics,
             "Invalid".into(),
-            false,
+            json_output,
             true,
         ));
     }
     let path = root.join(".agentforge/project.yaml");
     let previous_rendered = std::fs::read(&path).map_err(runtime)?;
-    let rendered = serde_yaml::to_string(&spec).map_err(internal)?;
+    let rendered = serde_yaml::to_string(&spec).map_err(config_error)?;
     let summary = json!({
         "operation": operation,
         "resource": kind,
@@ -1306,7 +1335,7 @@ fn mutate_spec(
         if compilation.plan.has_changes() {
             if let Err(error) = ApplicationService::new(root).apply(&compilation.plan) {
                 restore_spec(root, &previous_rendered)?;
-                return Err(runtime(error));
+                return Err(apply_failure(error));
             }
         }
     }
@@ -1364,6 +1393,45 @@ fn restore_update_state(
         {
             std::fs::remove_dir_all(vendor).map_err(runtime)?;
         }
+    }
+    Ok(())
+}
+
+/// Derives the canonical resource id from a user-supplied path or reference:
+/// the last path segment with a case-insensitive `.md` suffix removed,
+/// lowercased. `add`, `remove`, and `init` all use this derivation so a
+/// resource can be removed by the same value that created it.
+fn resource_id(value: &str) -> String {
+    let base = value.rsplit(['/', '\\']).next().unwrap_or(value);
+    let stem = match base.get(base.len().saturating_sub(3)..) {
+        Some(tail) if tail.eq_ignore_ascii_case(".md") => &base[..base.len() - 3],
+        _ => base,
+    };
+    stem.to_lowercase()
+}
+
+/// Rejects local skill sources that can never compile: the renderers require
+/// a `SKILL.md` manifest, so a single file with any other name is a
+/// guaranteed-failure path and must fail as a usage error instead.
+fn ensure_compilable_skill_source(root: &Path, value: &str) -> Result<(), CliFailure> {
+    if !matches!(
+        cli_source(value),
+        agentforge_core::model::Source::Local { .. }
+    ) {
+        return Ok(());
+    }
+    let path = root.join(value.replace('/', std::path::MAIN_SEPARATOR_STR));
+    if path.is_file()
+        && !path
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case("SKILL.md"))
+    {
+        return Err(CliFailure {
+            message: format!(
+                "local skill source '{value}' is a file; skills need a directory containing SKILL.md, or the SKILL.md file itself"
+            ),
+            exit: 2,
+        });
     }
     Ok(())
 }
@@ -1485,26 +1553,20 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
     let skills = args
         .skills
         .iter()
-        .map(|path| agentforge_core::model::Content {
-            id: path
-                .rsplit(['/', '\\'])
-                .next()
-                .unwrap_or(path)
-                .trim_end_matches(".md")
-                .to_lowercase(),
-            source: cli_source(path),
-            applies_to: vec![],
+        .map(|path| {
+            ensure_compilable_skill_source(&root, path)?;
+            Ok(agentforge_core::model::Content {
+                id: resource_id(path),
+                source: cli_source(path),
+                applies_to: vec![],
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, CliFailure>>()?;
     let mcp = args
         .mcp
         .iter()
         .map(|path| agentforge_core::model::Mcp {
-            id: path
-                .rsplit(['/', '\\'])
-                .next()
-                .unwrap_or(path)
-                .to_lowercase(),
+            id: resource_id(path),
             source: Some(cli_source(path)),
             transport: None,
             env: vec![],
@@ -1571,14 +1633,11 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
             }
         }
     }
-    let rendered = serde_yaml::to_string(&spec).map_err(internal)?;
+    let rendered = serde_yaml::to_string(&spec).map_err(config_error)?;
     let planned_artifacts = planned_artifacts(&target_values);
     let planned_conflicts = planned_artifacts
         .iter()
-        .filter(|relative| {
-            root.join(relative.replace('/', std::path::MAIN_SEPARATOR_STR))
-                .exists()
-        })
+        .filter(|relative| planned_artifact_exists(&root, relative))
         .cloned()
         .collect::<Vec<_>>();
     let lock_path = root.join(".agentforge/lock.yaml");
@@ -1606,7 +1665,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
                     "stale init vendor backup exists: {}",
                     vendor_backup.display()
                 ),
-                exit: 3,
+                exit: 6,
             });
         }
         std::fs::rename(&vendor_root, &vendor_backup).map_err(runtime)?;
@@ -1734,10 +1793,7 @@ fn init_pending(args: InitArgs) -> Result<Outcome, CliFailure> {
         if compilation.plan.has_changes() {
             if let Err(error) = ApplicationService::new(&root)
                 .apply(&compilation.plan)
-                .map_err(|error| CliFailure {
-                    message: error.to_string(),
-                    exit: 3,
-                })
+                .map_err(apply_failure)
             {
                 rollback_init_files(
                     &root,
@@ -1787,25 +1843,44 @@ fn planned_artifacts(targets: &[Target]) -> Vec<String> {
         match target {
             Target::Generic => {
                 paths.insert("AGENTS.md".to_owned());
+                paths.insert(".agents/skills/**".to_owned());
                 paths.insert(".agentforge/generated/mcp.json".to_owned());
                 paths.insert(".agentforge/generated/settings.yaml".to_owned());
             }
             Target::Codex => {
                 paths.insert("AGENTS.md".to_owned());
+                paths.insert(".agents/skills/**".to_owned());
                 paths.insert(".codex/config.toml".to_owned());
+                paths.insert(".codex/agents/**".to_owned());
             }
             Target::Claude => {
                 paths.insert("CLAUDE.md".to_owned());
+                paths.insert(".claude/skills/**".to_owned());
                 paths.insert(".mcp.json".to_owned());
                 paths.insert(".claude/settings.json".to_owned());
+                paths.insert(".claude/agents/**".to_owned());
             }
             Target::Copilot => {
                 paths.insert(".github/copilot-instructions.md".to_owned());
+                paths.insert(".github/skills/**".to_owned());
                 paths.insert(".github/mcp.json".to_owned());
+                paths.insert(".github/agents/**".to_owned());
             }
         }
     }
     paths.into_iter().collect()
+}
+
+/// Reports whether a planned artifact path, which may be a `/**` glob over a
+/// renderer output tree, already exists in the working tree.
+fn planned_artifact_exists(root: &Path, relative: &str) -> bool {
+    let native = relative.replace('/', std::path::MAIN_SEPARATOR_STR);
+    if let Some(directory) =
+        native.strip_suffix(format!("{0}**", std::path::MAIN_SEPARATOR_STR).as_str())
+    {
+        return root.join(directory).exists();
+    }
+    root.join(&native).exists()
 }
 
 fn cli_source(value: &str) -> agentforge_core::model::Source {
@@ -1943,6 +2018,18 @@ fn compile(root: &Path) -> Result<Compilation, CliFailure> {
                     .join("\n"),
                 exit: 1,
             },
+            CompileError::Vendor(inner) => CliFailure {
+                message: format!("vendor verification failed: {inner}"),
+                exit: 4,
+            },
+            CompileError::EscapingLocalSource(_) => CliFailure {
+                message: error.to_string(),
+                exit: 4,
+            },
+            CompileError::Io { .. } | CompileError::NonUtf8(_) => CliFailure {
+                message: error.to_string(),
+                exit: 6,
+            },
             CompileError::MissingFile(_)
             | CompileError::MissingLock { .. }
             | CompileError::InvalidLock(_)
@@ -1951,17 +2038,14 @@ fn compile(root: &Path) -> Result<Compilation, CliFailure> {
             | CompileError::DuplicateLockEntry(..)
             | CompileError::LockSourceTypeMismatch { .. }
             | CompileError::InvalidManifest(_)
-            | CompileError::Vendor(_)
             | CompileError::InvalidLocalPath(_)
             | CompileError::EmptySource { .. }
             | CompileError::AmbiguousTextSource { .. }
-            | CompileError::InvalidMcp(_) => CliFailure {
+            | CompileError::InvalidMcp(_)
+            | CompileError::Render(_)
+            | CompileError::Planning(_) => CliFailure {
                 message: error.to_string(),
                 exit: 1,
-            },
-            _ => CliFailure {
-                message: error.to_string(),
-                exit: 3,
             },
         })
 }
@@ -2156,22 +2240,57 @@ fn join(values: &[String]) -> String {
         values.join(", ")
     }
 }
+/// Filesystem or configuration IO failure (documented exit code 6).
 fn runtime(error: impl std::fmt::Display) -> CliFailure {
     CliFailure {
         message: error.to_string(),
-        exit: 3,
+        exit: 6,
     }
 }
-fn internal(error: impl std::fmt::Display) -> CliFailure {
+/// Configuration serialization or environment setup failure; treated as a
+/// config IO error (documented exit code 6).
+fn config_error(error: impl std::fmt::Display) -> CliFailure {
     CliFailure {
         message: error.to_string(),
-        exit: 4,
+        exit: 6,
+    }
+}
+/// The apply transaction failed and was rolled back (documented exit code 5).
+fn apply_failure(error: impl std::fmt::Display) -> CliFailure {
+    CliFailure {
+        message: error.to_string(),
+        exit: 5,
+    }
+}
+/// Source resolution or network failure (documented exit code 3); integrity
+/// and policy violations inside a source error escalate to exit code 4.
+fn source_failure(error: agentforge_sources::SourceError) -> CliFailure {
+    use agentforge_sources::SourceError;
+    let exit = match &error {
+        SourceError::ForbiddenEntry { .. }
+        | SourceError::PathCollision { .. }
+        | SourceError::UnsafePath(_)
+        | SourceError::FileTooLarge { .. }
+        | SourceError::TooManyFiles { .. }
+        | SourceError::DependencyTooLarge { .. }
+        | SourceError::TotalTooLarge { .. }
+        | SourceError::SizeOverflow
+        | SourceError::ChecksumMismatch { .. }
+        | SourceError::ExecutableContentNotAllowed
+        | SourceError::OfflineVerification { .. } => 4,
+        _ => 3,
+    };
+    CliFailure {
+        message: error.to_string(),
+        exit,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{cli_source, redact_text, restore_update_state};
+    use super::{
+        cli_source, planned_artifact_exists, redact_text, resource_id, restore_update_state,
+    };
     use agentforge_core::model::Source;
     use std::fs;
 
@@ -2204,6 +2323,24 @@ mod tests {
         fs::write(vendor.join("new.txt"), b"new").unwrap();
         restore_update_state(root.path(), &lock, None, false, &backup).unwrap();
         assert!(!vendor.exists());
+    }
+
+    #[test]
+    fn resource_id_is_derived_the_same_way_for_add_and_remove() {
+        assert_eq!(resource_id("ai/skills/Testing.md"), "testing");
+        assert_eq!(resource_id(r"ai\skills\Testing.MD"), "testing");
+        assert_eq!(resource_id("reviewer"), "reviewer");
+        assert_eq!(resource_id("目录/技能.md"), "技能");
+    }
+
+    #[test]
+    fn planned_artifact_exists_checks_glob_tree_roots() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".claude/skills/testing")).unwrap();
+        assert!(planned_artifact_exists(root.path(), ".claude/skills/**"));
+        assert!(!planned_artifact_exists(root.path(), ".codex/agents/**"));
+        std::fs::write(root.path().join("AGENTS.md"), b"x").unwrap();
+        assert!(planned_artifact_exists(root.path(), "AGENTS.md"));
     }
 
     #[test]

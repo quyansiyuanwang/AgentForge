@@ -312,15 +312,47 @@ fn relative_git_path<'a>(path: &'a str, subpath: Option<&str>) -> Result<&'a str
     let Some(subpath) = subpath else {
         return Ok(path);
     };
+    let subpath = subpath.trim_end_matches('/');
+    let path = path.trim_end_matches('/');
     if path == subpath {
         return path
             .rsplit('/')
             .next()
             .ok_or_else(|| SourceError::Git("invalid Git path".into()));
     }
-    path.strip_prefix(subpath)
-        .and_then(|rest| rest.strip_prefix('/'))
-        .ok_or_else(|| SourceError::Git("Git returned a path outside subpath".into()))
+    // Segment-aware: only a literal "subpath/" prefix counts, so sibling
+    // directories that merely share a text prefix stay outside the subpath.
+    match path.strip_prefix(subpath) {
+        Some(rest) if rest.starts_with('/') && rest.len() > 1 => Ok(&rest[1..]),
+        _ => Err(SourceError::Git(
+            "Git returned a path outside subpath".into(),
+        )),
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::relative_git_path;
+
+    #[test]
+    fn subpath_matching_is_segment_aware() {
+        assert_eq!(relative_git_path("SKILL.md", None).unwrap(), "SKILL.md");
+        assert_eq!(
+            relative_git_path("skills/testing/SKILL.md", Some("skills/testing")).unwrap(),
+            "SKILL.md"
+        );
+        assert_eq!(
+            relative_git_path("skills/testing", Some("skills/testing")).unwrap(),
+            "testing"
+        );
+        assert_eq!(
+            relative_git_path("skills/testing/", Some("skills/testing/")).unwrap(),
+            "testing"
+        );
+        assert!(relative_git_path("skills-extra/foo.md", Some("skills")).is_err());
+        assert!(relative_git_path("skillsfoo", Some("skills")).is_err());
+        assert!(relative_git_path("other/SKILL.md", Some("skills/testing")).is_err());
+    }
 }
 
 #[cfg(test)]

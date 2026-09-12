@@ -20,6 +20,12 @@ fn entry(id: &str, tree: &VendorTree) -> LockEntry {
         vendor_path: format!(".agentforge/vendor/skills/{id}"),
         sha256: tree.sha256.clone(),
         executable_content: tree.executable_content,
+        executable_paths: tree
+            .files
+            .iter()
+            .filter(|file| file.executable)
+            .map(|file| file.path.clone())
+            .collect(),
         file_count: tree.files.len() as u64,
         total_bytes: tree.total_bytes,
     }
@@ -80,4 +86,31 @@ fn offline_verifier_rejects_hard_links() {
     .unwrap();
     let lock = LockFile::new("agentforge 0.1.0", vec![entry("testing", &tree)]).unwrap();
     assert!(verify_vendor_offline(root.path(), &lock, VendorLimits::default()).is_err());
+}
+
+#[test]
+fn lock_records_executable_paths_for_cross_platform_verification() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join(".agentforge/vendor/skills/testing");
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("tool"), b"binary payload").unwrap();
+    // A chmod +x file without shebang or recognizable extension is only
+    // detectable through the permission bit on Unix; the lock must carry the
+    // classification so verification stays stable on every platform.
+    let tree = VendorTree::validate(
+        vec![UntrustedEntry {
+            path: "tool".into(),
+            kind: agentforge_sources::EntryKind::Regular,
+            mode: 0o755,
+            content: b"binary payload".to_vec(),
+        }],
+        VendorLimits::default(),
+        0,
+    )
+    .unwrap();
+    assert!(tree.executable_content);
+    let lock = LockFile::new("agentforge 0.1.0", vec![entry("testing", &tree)]).unwrap();
+    let yaml = lock.to_yaml().unwrap();
+    assert!(yaml.contains("executablePaths:"), "{yaml}");
+    verify_vendor_offline(root.path(), &lock, VendorLimits::default()).unwrap();
 }
