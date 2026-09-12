@@ -372,26 +372,38 @@ mod tests {
             loop {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 tokio::spawn(async move {
-                    let mut request = [0u8; 2048];
-                    let count = stream.read(&mut request).await.unwrap();
-                    let line = String::from_utf8_lossy(&request[..count]);
-                    let path = line.split_whitespace().nth(1).unwrap_or("/");
-                    let response = match path {
-                        "/start" => {
-                            "HTTP/1.1 302 Found\r\nLocation: /ok\r\nContent-Length: 0\r\n\r\n"
+                    // HTTP/1.1 keep-alive: serve every request arriving on the
+                    // connection, otherwise a pooled client connection races
+                    // with the server closing it between requests.
+                    loop {
+                        let mut request = [0u8; 2048];
+                        let count = match stream.read(&mut request).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(count) => count,
+                        };
+                        let line = String::from_utf8_lossy(&request[..count]);
+                        let path = line.split_whitespace().nth(1).unwrap_or("/");
+                        let response = match path {
+                            "/start" => {
+                                "HTTP/1.1 302 Found\r\nLocation: /ok\r\nContent-Length: 0\r\n\r\n"
+                            }
+                            "/loop" => {
+                                "HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\n\r\n"
+                            }
+                            "/rate" => {
+                                "HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\n\r\n"
+                            }
+                            "/large" => "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n0123456789",
+                            "/slow" => {
+                                tokio::time::sleep(Duration::from_millis(100)).await;
+                                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+                            }
+                            _ => "HTTP/1.1 200 OK\r\nETag: fixture\r\nContent-Length: 2\r\n\r\nok",
+                        };
+                        if stream.write_all(response.as_bytes()).await.is_err() {
+                            break;
                         }
-                        "/loop" => {
-                            "HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\n\r\n"
-                        }
-                        "/rate" => "HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\n\r\n",
-                        "/large" => "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n0123456789",
-                        "/slow" => {
-                            tokio::time::sleep(Duration::from_millis(100)).await;
-                            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
-                        }
-                        _ => "HTTP/1.1 200 OK\r\nETag: fixture\r\nContent-Length: 2\r\n\r\nok",
-                    };
-                    let _ = stream.write_all(response.as_bytes()).await;
+                    }
                 });
             }
         });
