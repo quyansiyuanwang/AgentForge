@@ -32,9 +32,9 @@ jobs:
           fi
       - name: Extract release notes
         run: |
-          awk -v section="## [${version}]" '
-            $0 == section { capture = 1; next }
-            capture && /^## \[/ { exit }
+          awk -v version="${version}" '
+            index($0, "## [" version "]") == 1 { capture = 1; next }
+            capture && index($0, "## [") == 1 { exit }
             capture { print }
           ' CHANGELOG.md > release-notes.md
           if [ ! -s release-notes.md ]; then
